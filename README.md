@@ -82,6 +82,31 @@ deepspeed --master_port 51419 main.py  --debug --data_path Anthropic/hh-rlhf --m
 deepspeed --master_port 51419 main.py  --data_path Anthropic/hh-rlhf  --model_name_or_path /mnt/petrelfs/wangxiao/MODELS/llama2HF/7B-Chat --per_device_train_batch_size 8 --per_device_eval_batch_size 16 --max_prompt_len 512 --max_ans_len 512 --learning_rate 1e-5 --weight_decay 0. --num_train_epochs 3 --gradient_accumulation_steps 8 --lr_scheduler_type cosine --num_warmup_steps 0 --seed 1234 --zero_stage 2 --deepspeed --print_loss --output_dir /mnt/petrelfs/wangxiao/7B_3epochs_runs > 7b.log 2>&1 &
 ```
 
+训练的坑， llama2 必须要按照 bf16 的格式训练，不然loss会炸。其他模型，fp16格式训练， 改 utils.ds_utils.py 的内容:
+
+```
+"fp16": {
+            "enabled": "auto",
+            "loss_scale": 0,
+            "loss_scale_window": 1000,
+            "initial_scale_power": 16,
+            "hysteresis": 2,
+            "min_loss_scale": 1
+        },
+ 
+ ->
+ 
+ "bfloat16": {
+            "enabled": "auto",
+            "loss_scale": 0,
+            "loss_scale_window": 1000,
+            "initial_scale_power": 16,
+            "hysteresis": 2,
+            "min_loss_scale": 1
+        },
+```
+
+
 
 ### 模型推理
 
