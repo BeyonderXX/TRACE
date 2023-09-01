@@ -27,14 +27,15 @@ from deepspeed.ops.adam import DeepSpeedCPUAdam, FusedAdam
 
 sys.path.append(
     os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir)))
-# from utils.data.data_utils import create_prompt_dataset
+from utils.data.data_utils import create_prompt_dataset
+from utils.data.data_collator import DataCollator
 from utils.utils import print_rank_0, to_device, save_hf_format, set_random_seed, get_all_reduce_mean, get_optimizer_grouped_parameters, save_zero_three_model, load_hf_tokenizer
 from utils.ds_utils import get_train_ds_config
 from utils.module.lora import convert_linear_layer_to_lora, convert_lora_to_linear_layer, only_optimize_lora_parameters
 from utils.model.model_utils import create_hf_model
 
-from utils.data.llama_utils import create_prompt_dataset
 
+# TODO, check support for OPT and llama
 
 
 def parse_args():
@@ -42,23 +43,9 @@ def parse_args():
         description=
         "Finetune a transformers model on a causal language modeling task")
     parser.add_argument('--data_path',
-                        nargs='*',
-                        default=['Dahoas/rm-static'],
-                        help='Path to the training dataset. Accepted format:'
-                        '1) a single data path, 2) multiple datasets in the'
-                        'form: dataset1-path dataset2-path ...')
-    parser.add_argument('--data_split',
                         type=str,
-                        default='2,4,4',
-                        help='Comma-separated list of proportions for training'
-                        'phase 1, 2, and 3 data. For example the split `6,2,2`'
-                        'will use 60%% of data for phase 1, 20%% for phase 2'
-                        'and 20%% for phase 3.')
-    parser.add_argument(
-        '--sft_only_data_path',
-        nargs='*',
-        default=[],
-        help='Path to the dataset for only using in SFT phase.')
+                        default='Dahoas/rm-static',
+                        help='Path to the training dataset, a single data path.')
     parser.add_argument(
         '--data_output_path',
         type=str,
@@ -86,15 +73,22 @@ def parse_args():
         help="Batch size (per device) for the evaluation dataloader.",
     )
     parser.add_argument(
-        "--max_seq_len",
+        "--max_prompt_len",
         type=int,
         default=512,
         help="The maximum sequence length.",
     )
     parser.add_argument(
+        "--max_ans_len",
+        type=int,
+        default=512,
+        help="The maximum sequence length.",
+    )
+
+    parser.add_argument(
         "--learning_rate",
         type=float,
-        default=1e-3,
+        default=1e-5,
         help=
         "Initial learning rate (after the potential warmup period) to use.",
     )
@@ -158,18 +152,7 @@ def parse_args():
         type=int,
         default=0,
         help='ZeRO optimization stage for Actor model (and clones).')
-    ## LoRA for efficient training setting
-    parser.add_argument("--lora_dim",
-                        type=int,
-                        default=0,
-                        help="If > 0, use LoRA for efficient training.")
-    parser.add_argument("--lora_module_name",
-                        type=str,
-                        default="decoder.layers.",
-                        help="The scope of LoRA.")
-    parser.add_argument('--only_optimize_lora',
-                        action='store_true',
-                        help='Only optimize the LoRA parameters.')
+    
     ## Tensorboard logging
     parser.add_argument('--enable_tensorboard',
                         action='store_true',
@@ -188,11 +171,6 @@ def parse_args():
     parser = deepspeed.add_config_arguments(parser)
     args = parser.parse_args()
 
-    # Validate settings
-    if args.gradient_checkpointing and args.lora_dim > 0:
-        assert (
-            not args.only_optimize_lora
-        ), "--gradient_checkpointing and --only_optimize_lora cannot be enabled at the same time."
 
     return args
 
@@ -215,7 +193,7 @@ def main():
                                     stage=args.zero_stage,
                                     enable_tensorboard=args.enable_tensorboard,
                                     tb_path=args.tensorboard_path,
-                                    tb_name="step1_model")
+                                    tb_name="v2_sft")
     # set batch size
     ds_config[
         'train_micro_batch_size_per_gpu'] = args.per_device_train_batch_size
@@ -237,36 +215,23 @@ def main():
         # todo, check for llama2
         tokenizer.pad_token = tokenizer.eos_token
 
-    # make sure tokenizer is right pad in our logic
-    tokenizer.padding_side = 'right'
+    # default the LLM is decoder only model, so padding side is left
+    tokenizer.padding_side = 'left'
 
     model = create_hf_model(AutoModelForCausalLM,
                             args.model_name_or_path,
                             tokenizer,
-                            ds_config,
+                            ds_config=ds_config,
                             disable_dropout=args.disable_dropout,
                             debug=args.debug)
-    
-    if args.lora_dim > 0:
-        model = convert_linear_layer_to_lora(model, args.lora_module_name,
-                                             args.lora_dim)
-        if args.only_optimize_lora:
-            model = only_optimize_lora_parameters(model)
 
-    # TODO, check data format of llama2
-    # TODO, modify param: end_of_conversation_token="<|endoftext|>"
     # Prepare the data
-    train_phase = 1
     train_dataset, eval_dataset = create_prompt_dataset(
         args.local_rank,
         args.data_path,
-        args.data_split,
         args.data_output_path,
-        train_phase,
-        args.seed,
-        tokenizer,
-        args.max_seq_len,
-        sft_only_data_path=args.sft_only_data_path)
+        args.seed
+    )
 
     # DataLoaders creation:
     if args.local_rank == -1:
@@ -275,12 +240,22 @@ def main():
     else:
         train_sampler = DistributedSampler(train_dataset)
         eval_sampler = DistributedSampler(eval_dataset)
+
+    data_collator  = DataCollator(
+        tokenizer,
+        padding="longest",
+        max_prompt_len=args.max_prompt_len,
+        max_ans_len=args.max_ans_len,
+        pad_to_multiple_of=8,
+        inference=False
+    )
+
     train_dataloader = DataLoader(train_dataset,
-                                  collate_fn=default_data_collator,
+                                  collate_fn=data_collator,
                                   sampler=train_sampler,
                                   batch_size=args.per_device_train_batch_size)
     eval_dataloader = DataLoader(eval_dataset,
-                                 collate_fn=default_data_collator,
+                                 collate_fn=data_collator,
                                  sampler=eval_sampler,
                                  batch_size=args.per_device_eval_batch_size)
 
@@ -290,6 +265,7 @@ def main():
         losses = 0
         for step, batch in enumerate(eval_dataloader):
             # implementation, batch = {k: v.to(device) for k, v in batch.items()}
+            del batch['sources']
             batch = to_device(batch, device)
             with torch.no_grad():
                 # TODO, check output
@@ -357,6 +333,7 @@ def main():
         model.train()
 
         for step, batch in enumerate(train_dataloader):
+            del batch['sources']
             batch = to_device(batch, device)
             outputs = model(**batch, use_cache=False)
             loss = outputs.loss
@@ -368,13 +345,12 @@ def main():
                 description = f"Epoch {epoch+1}, Step {step}, Loss: {loss.item():.4f}"
                 progress_bar.set_description(description, refresh=False)
     
-        
             model.backward(loss)
             # Correct gradient accumulation steps are handled withing the deepspeed engine's backward call.
             model.step()
-            #
-            # for debug
-            # if (step + 1) % 20 == 0:
+
+            # # for debug
+            # if (step + 1) % 100 == 0:
             #     break  
 
         # Evaluate perplexity on the validation set.
@@ -389,7 +365,6 @@ def main():
 
     if args.output_dir is not None:
         print_rank_0('saving the final model ...', args.global_rank)
-        model = convert_lora_to_linear_layer(model)
 
         if args.global_rank == 0:
             save_hf_format(model, tokenizer, args)
@@ -400,6 +375,7 @@ def main():
                                   args.global_rank,
                                   args.output_dir,
                                   zero_stage=args.zero_stage)
+        print_rank_0(f'Sucessful saving the final model to {args.output_dir}', args.global_rank)
 
 
 if __name__ == "__main__":

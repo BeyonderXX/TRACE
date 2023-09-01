@@ -51,6 +51,9 @@ def load_hf_tokenizer(model_name_or_path, fast_tokenizer=True):
             model_name = model_json_file["_name_or_path"]
             tokenizer = AutoTokenizer.from_pretrained(
                 model_name, fast_tokenizer=fast_tokenizer)
+    elif 'falcon' in model_name_or_path.lower():
+        tokenizer = AutoTokenizer.from_pretrained(
+            model_name_or_path, trust_remote_code=True)
     else:
         tokenizer = AutoTokenizer.from_pretrained(
             model_name_or_path, fast_tokenizer=fast_tokenizer)
@@ -173,6 +176,7 @@ def save_zero_three_model(model_ema, global_rank, save_dir, zero_stage=0):
             torch.save(model_to_save.state_dict(), output_model_file)
     else:
         output_state_dict = {}
+        # 问题出在这里，不会保存不在named_parameters()里的参数，若是 model_to_save.state_dict() 则 OK
         for k, v in model_to_save.named_parameters():
 
             if hasattr(v, 'ds_id'):
