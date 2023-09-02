@@ -226,7 +226,7 @@ def main():
                             debug=args.debug)
 
     # Prepare the data
-    train_dataset, eval_dataset = create_prompt_dataset(
+    train_dataset, eval_dataset, _ = create_prompt_dataset(
         args.local_rank,
         args.data_path,
         args.data_output_path,
