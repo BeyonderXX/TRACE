@@ -237,9 +237,13 @@ def main():
                 progress_bar.set_description(description, refresh=False)
 
             with torch.no_grad():
-                # TODO, add more inference params
+                # # for backbone llama 2 inference
+                # generate_ids = model.generate(batch['input_ids'], max_new_tokens=args.max_ans_len, 
+                #                               pad_token_id=tokenizer.eos_token_id, attention_mask = batch['attention_mask'], temperature=0.7, do_sample=True, repetition_penalty=2.0)
+
+                # for SFT inference
                 generate_ids = model.generate(batch['input_ids'], max_new_tokens=args.max_ans_len, 
-                                              pad_token_id=tokenizer.eos_token_id, attention_mask = batch['attention_mask'], temperature=0.7, do_sample=True, repetition_penalty=2.0 )
+                                              pad_token_id=tokenizer.eos_token_id, attention_mask = batch['attention_mask'], temperature=0.1, do_sample=True, repetition_penalty=2.0)
 
             sequences = tokenizer.batch_decode(generate_ids[:, prompt_len:], skip_special_tokens=True, clean_up_tokenization_spaces=False)
             predicted_sequences += sequences
