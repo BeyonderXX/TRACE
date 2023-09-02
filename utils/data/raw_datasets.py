@@ -107,27 +107,17 @@ class LocalJsonFileDataset(PromptRawDataset):
             return self.raw_datasets['eval']
         return None
 
-    # The prompt should be in the format of: " Human: " + actual_prompt_sentence + " Assistant:"
     def get_prompt(self, sample):
         if sample['prompt'] is not None:
-            if self.for_backbone:
-                return "Question: " + sample['prompt'] + " Answer: "
-            else:
-                return "Human: " + sample['prompt'] + " Assistant: "
+            return sample['prompt']
         return None
 
-    # The chosen response should be in the format of: " " + actual_response_sentence
     def get_answer(self, sample):
         if sample['answer'] is not None:
             return sample['answer']
         return ''
 
-    # todo, modify
     def get_prompt_and_answer(self, sample):
         if sample['prompt'] is not None and sample['answer'] is not None:
-            if self.for_backbone:
-                return "Question: " + sample['prompt'] + " Answer: "+ sample['answer']
-            else:
-                return "Human: " + sample['prompt'] + " Assistant: " + sample['answer']
+            return sample['prompt'] + "\n" + sample['answer']
         return None
-
