@@ -259,7 +259,7 @@ def get_prompt_dataset(current_dataset, raw_dataset, add_sys_prefix=False):
 # step 2
 def create_dataset(local_rank, dataset_name, output_path,
                    seed, add_sys_prefix=False, for_backbone=False):
-    # 加载数据集，用datasets接口加载好返回，此外做了train,eval分片
+    # 加载数据集，用datasets接口加载好返回，此外做了train,eval,test分片
     raw_dataset = get_raw_dataset(dataset_name, output_path, seed, local_rank, for_backbone=for_backbone)
 
     train_dataset = raw_dataset.get_train_data()
@@ -268,7 +268,10 @@ def create_dataset(local_rank, dataset_name, output_path,
     eval_dataset = raw_dataset.get_eval_data()
     eval_dataset = get_prompt_dataset(eval_dataset, raw_dataset, add_sys_prefix=add_sys_prefix)
 
-    return train_dataset, eval_dataset
+    test_dataset = raw_dataset.get_test_data()
+    test_dataset = get_prompt_dataset(test_dataset, raw_dataset, add_sys_prefix=add_sys_prefix)
+
+    return train_dataset, eval_dataset, test_dataset
 
 
 # step 1
@@ -291,6 +294,7 @@ def create_prompt_dataset(local_rank,
     )  # hash the file name to avoid too long file name
     train_fname = f"{output_path}/traindata_{fname}.pt"
     eval_fname = f"{output_path}/evaldata_{fname}.pt"
+    test_fname = f"{output_path}/testdata_{fname}.pt"
 
     cache_found = os.path.isfile(train_fname) and os.path.isfile(eval_fname)
     buf_create_cache = torch.ByteTensor([not cache_found]).cuda()
@@ -300,7 +304,7 @@ def create_prompt_dataset(local_rank,
     # for debug
     # if local_rank <= 0 and (buf_create_cache.item() != 0 or reload):
     if local_rank <= 0:
-        train_dataset, eval_dataset = create_dataset(
+        train_dataset, eval_dataset, test_dataset = create_dataset(
             local_rank, data_path, output_path,
             seed, add_sys_prefix=add_sys_prefix, for_backbone=for_backbone)
         
@@ -308,6 +312,7 @@ def create_prompt_dataset(local_rank,
         # 提前准备好，可以加速预处理，torch.load 速度也会比较快
         torch.save(train_dataset, train_fname)
         torch.save(eval_dataset, eval_fname)
+        torch.save(test_dataset, test_fname)
 
     torch.distributed.barrier()
-    return torch.load(train_fname), torch.load(eval_fname)
+    return torch.load(train_fname), torch.load(eval_fname), torch.load(test_fname)
