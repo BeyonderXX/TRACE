@@ -24,6 +24,8 @@ from transformers import (
 
 import deepspeed
 from deepspeed.ops.adam import DeepSpeedCPUAdam, FusedAdam
+from deepspeed.utils import safe_get_full_grad
+
 
 sys.path.append(
     os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir)))
@@ -33,6 +35,11 @@ from utils.utils import print_rank_0, to_device, save_hf_format, set_random_seed
 from utils.ds_utils import get_train_ds_config
 from utils.module.lora import convert_linear_layer_to_lora, convert_lora_to_linear_layer, only_optimize_lora_parameters
 from utils.model.model_utils import create_hf_model
+
+from model.Dynamic_network.PP import PP, ResMLP, convert_model
+from model.Dynamic_network.PP_test import PP_test
+from model.Regular.EWC import EWC
+from model.Regular.GEM import GEM
 
 
 # TODO, check support for OPT and llama
@@ -168,6 +175,9 @@ def parse_args():
     parser.add_argument('--debug',
                         action='store_true',
                         help='debug mode, which will use a small model and small dataset')
+    parser.add_argument('--CL_method',
+                default=None,
+                help='continual learning method used')
     parser = deepspeed.add_config_arguments(parser)
     args = parser.parse_args()
 
@@ -226,7 +236,7 @@ def main():
                             debug=args.debug)
 
     # Prepare the data
-    train_dataset, eval_dataset, _ = create_prompt_dataset(
+    train_dataset, eval_dataset = create_prompt_dataset(
         args.local_rank,
         args.data_path,
         args.data_output_path,
@@ -284,23 +294,44 @@ def main():
             pass
         return perplexity
 
-    # Split weights in two groups, one with weight decay and the other not.
-    optimizer_grouped_parameters = get_optimizer_grouped_parameters(
-        model, args.weight_decay)
+    def get_optimizer(model):
+        # Split weights in two groups, one with weight decay and the other not.
+        optimizer_grouped_parameters = get_optimizer_grouped_parameters(
+            model, args.weight_decay)
 
-    AdamOptimizer = DeepSpeedCPUAdam if args.offload else FusedAdam
-    optimizer = AdamOptimizer(optimizer_grouped_parameters,
-                              lr=args.learning_rate,
-                              betas=(0.9, 0.95))
+        AdamOptimizer = DeepSpeedCPUAdam if args.offload else FusedAdam
+        optimizer = AdamOptimizer(optimizer_grouped_parameters,
+                                lr=args.learning_rate,
+                                betas=(0.9, 0.95))
 
-    num_update_steps_per_epoch = math.ceil(
-        len(train_dataloader) / args.gradient_accumulation_steps)
-    lr_scheduler = get_scheduler(
-        name=args.lr_scheduler_type,
-        optimizer=optimizer,
-        num_warmup_steps=args.num_warmup_steps,
-        num_training_steps=args.num_train_epochs * num_update_steps_per_epoch,
-    )
+        num_update_steps_per_epoch = math.ceil(
+            len(train_dataloader) / args.gradient_accumulation_steps)
+        lr_scheduler = get_scheduler(
+            name=args.lr_scheduler_type,
+            optimizer=optimizer,
+            num_warmup_steps=args.num_warmup_steps,
+            num_training_steps=args.num_train_epochs * num_update_steps_per_epoch,
+        )
+        
+        return optimizer, lr_scheduler
+    
+    if args.debug:
+        task_list={}
+        task_list['task1']=train_dataloader
+        task_list['task2']=train_dataloader
+    if args.CL_method=="PP":
+        if "opt" in args.model_name_or_path.lower():
+            embed_tokens_shape = model.model.decoder.embed_tokens.weight.shape
+            embed_tokens = model.model.decoder.embed_tokens
+            
+            args.embed_tokens_dim = embed_tokens_shape[1]
+            args.embed_tokens_length = embed_tokens_shape[0]
+            args.embed_tokens = embed_tokens
+        args.prefix_len = 20
+        args.task_length = len(task_list)
+        model = convert_model(model, args)
+        
+    optimizer, lr_scheduler = get_optimizer(model)
 
     model, optimizer, _, lr_scheduler = deepspeed.initialize(
         model=model,
@@ -315,13 +346,28 @@ def main():
 
     # Train!
     print_rank_0("***** Running training *****", args.global_rank)
-    print_rank_0(
-        f"***** Evaluating perplexity, Epoch {0}/{args.num_train_epochs} *****",
-        args.global_rank)
-    perplexity = evaluation(model, eval_dataloader)
-    print_rank_0(f"ppl: {perplexity}", args.global_rank)
+    # print_rank_0(
+    #     f"***** Evaluating perplexity, Epoch {0}/{args.num_train_epochs} *****",
+    #     args.global_rank)
+    # perplexity = evaluation(model, eval_dataloader)
+    # print_rank_0(f"ppl: {perplexity}", args.global_rank)
 
     # Initialize the global progress bar
+    
+    if args.CL_method == "PP":
+        CL_Trainer = PP(model, tokenizer, optimizer, task_list, args)
+        CL_Trainer.train_continual(save_path=args.output_dir)
+        
+    elif args.CL_method == "EWC":
+        CL_Trainer = EWC(model, tokenizer, task_list, args)
+        CL_Trainer.train_continual()
+    
+    elif args.CL_method == "GEM":
+        CL_Trainer = GEM(model, task_list, args)
+        CL_Trainer.train_continual()
+        
+        
+    '''
     total_steps = args.num_train_epochs * len(train_dataloader)
     progress_bar = tqdm(total=total_steps, leave=True, disable=(args.global_rank != 0))
 
@@ -347,6 +393,12 @@ def main():
     
             model.backward(loss)
             # Correct gradient accumulation steps are handled withing the deepspeed engine's backward call.
+            
+            # for name, param in model.named_parameters():
+            #     hp_grad = safe_get_full_grad(param)
+            #     if args.global_rank<=0:
+            #         print("{}:{}".format(name,hp_grad))
+            
             model.step()
 
             # # for debug
@@ -362,7 +414,7 @@ def main():
         model.tput_timer.update_epoch_count()
 
     # TODO, model benchmarking
-
+    '''
     if args.output_dir is not None:
         print_rank_0('saving the final model ...', args.global_rank)
 
