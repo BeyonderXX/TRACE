@@ -94,7 +94,9 @@ class LocalJsonFileDataset(PromptRawDataset):
                                              "train":
                                              dataset_name + '/train.json',
                                              "eval":
-                                             dataset_name + '/eval.json'
+                                             dataset_name + '/eval.json',
+                                             "test":
+                                             dataset_name + '/test.json',
                                          })
 
     def get_train_data(self):
@@ -105,6 +107,11 @@ class LocalJsonFileDataset(PromptRawDataset):
     def get_eval_data(self):
         if self.raw_datasets['eval'] is not None:
             return self.raw_datasets['eval']
+        return None
+
+    def get_test_data(self):
+        if self.raw_datasets['test'] is not None:
+            return self.raw_datasets['test']
         return None
 
     def get_prompt(self, sample):
