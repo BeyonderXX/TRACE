@@ -28,3 +28,6 @@ tensorboard-data-server==0.7.1
 Jinja2==3.1.2
 multiprocess==0.70.15
 networkx==3.1
+nltk==3.5
+rouge==1.0.1
+fuzzywuzzy
