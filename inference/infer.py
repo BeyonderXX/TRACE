@@ -19,6 +19,7 @@ import math
 import sys
 from tqdm import tqdm
 import pandas as pd
+import json
 
 import torch
 from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
@@ -43,6 +44,9 @@ from utils.data.data_utils import create_prompt_dataset
 from utils.utils import print_rank_0, to_device, save_hf_format, set_random_seed, get_all_reduce_mean, get_optimizer_grouped_parameters, save_zero_three_model, load_hf_tokenizer
 from utils.ds_utils import get_train_ds_config
 from utils.model.model_utils import create_hf_model
+
+from evaluations import eval_ScienceQA, eval_MeetingBank, eval_PapyrusF, eval_CStance, eval_Py150 # to be continued
+
 
 
 # dist.init_process_group(backend='nccl')
@@ -92,6 +96,12 @@ def parse_args():
         help="Inference batch size.",
     )
     # TODO, add other inference params
+    parser.add_argument(
+        "--inference_task",
+        type=str,
+        default=None,
+        help="Which task to be infered"
+    )
 
 
     parser.add_argument("--output_dir",
@@ -250,28 +260,41 @@ def main():
         return sources_sequences, predicted_sequences
 
     
-    def save_inference_results(sources_sequences, predicted_sequences):
-        prompts = []
-        results = []
+    def save_inference_results(evaluation_result: dict, sources_sequences: list, predicted_sequences: list, ground_truths: list):
+        # save as a json file
+        df = {"eval": evaluation_result, 'prompts': sources_sequences, 'results': predicted_sequences, 'labels': ground_truths}
+        with open(args.inference_output_path, "w", encoding='utf-8') as file:
+            json.dump(df, file, ensure_ascii=False)
 
-        for source, predicted in zip(sources_sequences, predicted_sequences):
-            prompts.append(source)
-            results.append(predicted)
-
-        # save prompts and results in a csv file
-        df = pd.DataFrame({'prompts': prompts, 'results': results})
-        df.to_csv(args.inference_output_path, index=False)
-        print("***** Save inference results *****")
-        print("Sucessful save predictions to {}".format(args.inference_output_path))
 
     # Inference !
     print_rank_0("***** Start inference *****", args.global_rank)
     sources_sequences, predicted_sequences = prediction(model, infer_dataloader)
 
+    with open(args.data_path + "/test.json", "r", encoding="utf-8") as file:
+        testset = json.load(file)
+    ground_truths = []
+    for item in testset:
+        ground_truths.append(item["answer"])
 
+    # Get Accuracy/ROUGE/BLEU/...
+    # The evaluation result is stored in a dictionary. e.g. {"accuracy": .., "rouge-L": ..}
+    if args.inference_task == "ScienceQA":
+        evaluation_result = eval_ScienceQA.eval(predicted_sequences, ground_truths)
+    elif args.inference_task == "MeetingBank":
+        evaluation_result = eval_MeetingBank.eval(predicted_sequences, ground_truths)
+    elif args.inference_task == "C-Stance":
+        evaluation_result = eval_CStance.eval(predicted_sequences, ground_truths)
+    elif args.inference_task == "Papyrus-f":
+        evaluation_result = eval_PapyrusF.eval(predicted_sequences, ground_truths)
+    elif args.inference_task == "Py150":
+        evaluation_result = eval_Py150.eval(predicted_sequences, ground_truths
+    else:
+        evaluation_result = {}                                        
+    
     if args.global_rank <= 0:
-        print("***** Start inference results *****")
-        save_inference_results(sources_sequences, predicted_sequences)
+        print("***** Saving inference results *****")
+        save_inference_results(evaluation_result, sources_sequences, predicted_sequences, ground_truths)
 
 
 if __name__ == "__main__":
