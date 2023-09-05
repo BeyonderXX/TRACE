@@ -1,115 +1,102 @@
-from copy import deepcopy
-
+import numpy as np
 import torch
-import torch.utils.data
+import quadprog
+import random
 from tqdm.auto import tqdm
-from torch import nn
+import copy
+import json
+import torch.nn.functional as F
 
-
-class L2P:
-    
-    def __init__(self, model, 
+class LwF(object):
+    def __init__(self,
+                 model,
                  task_list,
-                 prompt_length=5,
-                 embedding_key='mean',
-                 prompt_init='uniform',
-                 pool_size=None,
-                 top_k=3,
-                 batchwise_prompt=False
+                 args,
                  ):
-        
-        
         self.model = model
         self.task_list = task_list
-        self.prompt_length = prompt_length
-        self.embed_dim = self.model.model.embed_tokens.weight.shape[1]
-        self.embedding_key = embedding_key
-        self.prompt_init = prompt_init
-        self.pool_size = pool_size
-        self.top_k = top_k
-        self.batchwise_prompt = batchwise_prompt
+        self.args = args
+            
+    def train_step(self,
+                    batch):
 
+        lm_labels = batch["labels"]
+        outputs = self.model(input_ids=batch['input_ids'], labels=lm_labels, attention_mask=batch['attention_mask'])
+        loss = outputs[0]
 
-
-        prompt_pool_shape = (self.pool_size, prompt_length, self.embed_dim)
-        if self.prompt_init == 'zero':
-            self.prompt = nn.Parameter(torch.zeros(prompt_pool_shape))
-        elif self.prompt_init == 'uniform':
-            self.prompt = nn.Parameter(torch.randn(prompt_pool_shape))
-            nn.init.uniform_(self.prompt, -1, 1)
-        
-        # use mean of prompt as key
-        # only compatible with prompt, not prefix
-        prompt_mean = torch.mean(self.prompt, dim=1)
-        self.prompt_key = prompt_mean
+        return loss
     
-    def l2_normalize(self, x, dim=None, epsilon=1e-12):
-        """Normalizes a given vector or matrix."""
-        square_sum = torch.sum(x ** 2, dim=dim, keepdim=True)
-        x_inv_norm = torch.rsqrt(torch.maximum(square_sum, torch.tensor(epsilon, device=x.device)))
-        return x * x_inv_norm
     
-    def forward(self, x_embed, prompt_mask=None, cls_features=None):
-        out = dict()
-        if self.embedding_key == 'mean':
-            x_embed_mean = torch.mean(x_embed, dim=1)
-        elif self.embedding_key == 'max':
-            x_embed_mean = torch.max(x_embed, dim=1)[0]
-        elif self.embedding_key == 'mean_max':
-            x_embed_mean = torch.max(x_embed, dim=1)[0] + 2 * torch.mean(x_embed, dim=1)
-        elif self.embedding_key == 'cls':
-            if cls_features is None:
-                x_embed_mean = torch.max(x_embed, dim=1)[0] # B, C
-            else:
-                x_embed_mean = cls_features
-        else:
-            raise NotImplementedError("Not supported way of calculating embedding keys!")
-
-        prompt_norm = self.l2_normalize(self.prompt_key, dim=1) # Pool_size, C
-        x_embed_norm = self.l2_normalize(x_embed_mean, dim=1) # B, C
-
-        similarity = torch.matmul(x_embed_norm, prompt_norm.t()) # B, Pool_size
+    def KD_loss(self, new_logits, prev_logits, T):
+        prev_logits = prev_logits.to('cuda')
+        prev_logits = F.log_softmax(prev_logits/T, dim=1)
+        new_logits = F.softmax(new_logits/T, dim=1)
+        kd_loss = torch.sum(prev_logits * new_logits, dim=1, keepdim=False)
+        kd_loss = -torch.mean(kd_loss, dim=0, keepdim=False)
         
-        if prompt_mask is None:
-            _, idx = torch.topk(similarity, k=self.top_k, dim=1) # B, top_k
-            if self.batchwise_prompt:
-                prompt_id, id_counts = torch.unique(idx, return_counts=True, sorted=True)
-                # In jnp.unique, when the 'size' is specified and there are fewer than the indicated number of elements,
-                # the remaining elements will be filled with 'fill_value', the default is the minimum value along the specified dimension.
-                # Unless dimension is specified, this will be flattend if it is not already 1D.
-                if prompt_id.shape[0] < self.pool_size:
-                    prompt_id = torch.cat([prompt_id, torch.full((self.pool_size - prompt_id.shape[0],), torch.min(idx.flatten()), device=prompt_id.device)])
-                    id_counts = torch.cat([id_counts, torch.full((self.pool_size - id_counts.shape[0],), 0, device=id_counts.device)])
-                _, major_idx = torch.topk(id_counts, k=self.top_k) # top_k
-                major_prompt_id = prompt_id[major_idx] # top_k
-                # expand to batch
-                idx = major_prompt_id.expand(x_embed.shape[0], -1) # B, top_k
-        else:
-            idx = prompt_mask # B, top_k
-
-        batched_prompt_raw = self.prompt[idx] # B, top_k, length, C
-        batch_size, top_k, length, c = batched_prompt_raw.shape
-        batched_prompt = batched_prompt_raw.reshape(batch_size, top_k * length, c) # B, top_k * length, C
-
-        out['prompt_idx'] = idx
-
-        # Debugging, return sim as well
-        out['prompt_norm'] = prompt_norm
-        out['x_embed_norm'] = x_embed_norm
-        out['similarity'] = similarity
-
-        # Put pull_constraint loss calculation inside
-        batched_key_norm = prompt_norm[idx] # B, top_k, C
-        out['selected_key'] = batched_key_norm
-        x_embed_norm = x_embed_norm.unsqueeze(1) # B, 1, C
-        sim = batched_key_norm * x_embed_norm # B, top_k, C
-        reduce_sim = torch.sum(sim) / x_embed.shape[0] # Scalar
-
-        out['reduce_sim'] = reduce_sim
+        
+        return kd_loss
+    
+    def new_input_old_model_logits(self, i_task):
+        train_dataloader = self.task_list[i_task+1]
+        new_task_logits = {}
+        for step, batch in enumerate(tqdm(train_dataloader)):
+            del batch['sources']
+            batch = {k:batch[k].to('cuda') for k in batch}
+            outputs = self.model(input_ids=batch['input_ids'], labels=batch['labels'], attention_mask=batch['attention_mask'])
+            logits = outputs.logits
+            new_task_logits[str(step)] = logits
+            
+        new_task_logits = json.dumps(new_task_logits)
+        with open(self.args.output_dir+"/LwF/{}.json".format(i_task+1),"w") as w:
+            w.write(new_task_logits)
+            
 
         
-        # The input with the prompt concatenated to the front. [B, prompt+token, C]
-        out['total_prompt_len'] = batched_prompt.shape[1]
-        out['prompted_embedding'] = torch.cat([batched_prompt, x_embed], dim=1)
+    
+    def train_one_task(self,
+                       task,
+                       i_task,
+                       epochs=40
+                       ):
+        if i_task!=0:
+            with open(self.args.output_dir+"/LwF/{}.json") as f:
+                prev_logits = json.load(f)
 
-        return out
+        dataloader_train = self.task_list[task]
+        for epoch in range(epochs):
+            print(epoch)
+            self.model.train()
+            total_steps = self.args.num_train_epochs * len(dataloader_train)
+            progress_bar = tqdm(total=total_steps, leave=True, disable=(self.args.global_rank != 0))
+
+            for step, batch in enumerate(tqdm(dataloader_train)):
+                del batch['sources']
+                batch = {k:batch[k].to('cuda') for k in batch}
+                loss = self.train_step(batch)
+                if self.args.global_rank == 0:
+                    # Update the progress bar
+                    progress_bar.update(1)
+                    description = f"Epoch {epoch+1}, Step {step}, Loss: {loss.item():.4f}"
+                    progress_bar.set_description(description, refresh=False)
+                    
+                if i_task!=0:
+                    loss += self.KD_loss(loss.logits, prev_logits[str(step)], 2)
+                
+                self.model.backward(loss)
+                self.model.step()
+                
+        if i_task+1 < len(self.task_list):
+            self.new_input_old_model_logits(i_task)
+
+
+
+    
+    # Train model continually
+    def train_continual(self,
+                        epochs=40,
+                        ):
+        self.observed_tasks.append(0)
+        for num, task in enumerate(self.task_list):
+            self.train_one_task(task, num, epochs)
+            

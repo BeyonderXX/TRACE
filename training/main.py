@@ -3,6 +3,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # DeepSpeed Team
+import sys
+sys.dont_write_bytecode = True
+
 import argparse
 import os
 import math
@@ -36,10 +39,11 @@ from utils.ds_utils import get_train_ds_config
 from utils.module.lora import convert_linear_layer_to_lora, convert_lora_to_linear_layer, only_optimize_lora_parameters
 from utils.model.model_utils import create_hf_model
 
-from model.Dynamic_network.PP import PP, ResMLP, convert_model
-from model.Dynamic_network.PP_test import PP_test
+from model.Dynamic_network.PP import PP, convert_model
+from model.Regular.LwF import LwF
 from model.Regular.EWC import EWC
 from model.Regular.GEM import GEM
+from model.Regular.OGD import OGD
 
 
 # TODO, check support for OPT and llama
@@ -330,6 +334,7 @@ def main():
         args.prefix_len = 20
         args.task_length = len(task_list)
         model = convert_model(model, args)
+    
         
     optimizer, lr_scheduler = get_optimizer(model)
 
@@ -353,68 +358,63 @@ def main():
     # print_rank_0(f"ppl: {perplexity}", args.global_rank)
 
     # Initialize the global progress bar
-    
-    if args.CL_method == "PP":
-        CL_Trainer = PP(model, tokenizer, optimizer, task_list, args)
-        CL_Trainer.train_continual(save_path=args.output_dir)
-        
-    elif args.CL_method == "EWC":
-        CL_Trainer = EWC(model, tokenizer, task_list, args)
-        CL_Trainer.train_continual()
-    
-    elif args.CL_method == "GEM":
-        CL_Trainer = GEM(model, task_list, args)
+    method2class = {"PP":PP,
+                    "EWC":EWC,
+                    "GEM":GEM,
+                    "OGD":OGD,
+                    "LwF":LwF}
+    if args.CL_method in method2class.keys():
+        CL_Trainer = method2class[args.CL_method](model, tokenizer, optimizer, task_list, args)
         CL_Trainer.train_continual()
         
+    else:
+        total_steps = args.num_train_epochs * len(train_dataloader)
+        progress_bar = tqdm(total=total_steps, leave=True, disable=(args.global_rank != 0))
+
+
+        for epoch in range(args.num_train_epochs):
+            print_rank_0(
+                f"Beginning of Epoch {epoch+1}/{args.num_train_epochs}, Total Micro Batches {len(train_dataloader)}",
+                args.global_rank)
+            model.train()
+
+            for step, batch in enumerate(train_dataloader):
+                del batch['sources']
+                batch = to_device(batch, device)
+                outputs = model(**batch, use_cache=False)
+                loss = outputs.loss
+
+                # Update the description to include current step and loss, if needed
+                if args.global_rank == 0:
+                    # Update the progress bar
+                    progress_bar.update(1)
+                    description = f"Epoch {epoch+1}, Step {step}, Loss: {loss.item():.4f}"
+                    progress_bar.set_description(description, refresh=False)
         
-    '''
-    total_steps = args.num_train_epochs * len(train_dataloader)
-    progress_bar = tqdm(total=total_steps, leave=True, disable=(args.global_rank != 0))
+                model.backward(loss)
+                # Correct gradient accumulation steps are handled withing the deepspeed engine's backward call.
+                
+                # for name, param in model.named_parameters():
+                #     hp_grad = safe_get_full_grad(param)
+                #     if args.global_rank<=0:
+                #         print("{}:{}".format(name,hp_grad))
+                
+                model.step()
 
+                # # for debug
+                # if (step + 1) % 100 == 0:
+                #     break  
 
-    for epoch in range(args.num_train_epochs):
-        print_rank_0(
-            f"Beginning of Epoch {epoch+1}/{args.num_train_epochs}, Total Micro Batches {len(train_dataloader)}",
-            args.global_rank)
-        model.train()
-
-        for step, batch in enumerate(train_dataloader):
-            del batch['sources']
-            batch = to_device(batch, device)
-            outputs = model(**batch, use_cache=False)
-            loss = outputs.loss
-
-            # Update the description to include current step and loss, if needed
-            if args.global_rank == 0:
-                # Update the progress bar
-                progress_bar.update(1)
-                description = f"Epoch {epoch+1}, Step {step}, Loss: {loss.item():.4f}"
-                progress_bar.set_description(description, refresh=False)
-    
-            model.backward(loss)
-            # Correct gradient accumulation steps are handled withing the deepspeed engine's backward call.
-            
-            # for name, param in model.named_parameters():
-            #     hp_grad = safe_get_full_grad(param)
-            #     if args.global_rank<=0:
-            #         print("{}:{}".format(name,hp_grad))
-            
-            model.step()
-
-            # # for debug
-            # if (step + 1) % 100 == 0:
-            #     break  
-
-        # Evaluate perplexity on the validation set.
-        print_rank_0(
-            f"***** Evaluating perplexity, Epoch {epoch+1}/{args.num_train_epochs} *****",
-            args.global_rank)
-        perplexity = evaluation(model, eval_dataloader)
-        print_rank_0(f"ppl: {perplexity}", args.global_rank)
-        model.tput_timer.update_epoch_count()
+            # Evaluate perplexity on the validation set.
+            print_rank_0(
+                f"***** Evaluating perplexity, Epoch {epoch+1}/{args.num_train_epochs} *****",
+                args.global_rank)
+            perplexity = evaluation(model, eval_dataloader)
+            print_rank_0(f"ppl: {perplexity}", args.global_rank)
+            model.tput_timer.update_epoch_count()
 
     # TODO, model benchmarking
-    '''
+    
     if args.output_dir is not None:
         print_rank_0('saving the final model ...', args.global_rank)
 

@@ -5,21 +5,13 @@ from torch.autograd import Variable
 import torch.utils.data
 from tqdm.auto import tqdm
 from torch import nn
+from model.base_model import CL_Base_Model
 
 
-class EWC(object):
-    def __init__(self,
-                 model,
-                 tokenizer,
-                 task_list,
-                 args):
-
-        self.model = model
-        self.tokenizer = tokenizer
-        self.task_list = task_list
-        self.args = args
+class EWC(CL_Base_Model):
+    def __init__(self):
+        super().__init__()
         self.device="cuda"
-
         self.params = {n: p for n, p in self.model.named_parameters() if p.requires_grad}
         self._previous_params = {}
 
@@ -109,6 +101,7 @@ class EWC(object):
             self.model.train()
 
             for step, batch in enumerate(tqdm(dataloader_train)):
+                del batch['sources']
                 batch = {k:batch[k].to('cuda') for k in batch}
                 loss = self.train_step(batch)
                 
@@ -124,15 +117,13 @@ class EWC(object):
 
     
     # Train model continually
-    def train_continual(self,
-                        epochs=40,
-                        ):
+    def train_continual(self):
         #在训练之前确定梯度
         self.retain_grad()
 
         for num, task in enumerate(self.task_list):
             self.task_num=num
-            self.train_one_task(task, epochs)
+            self.train_one_task(task, self.args.num_train_epochs)
             self._regular_fisher()  
             
             '''

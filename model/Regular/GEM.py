@@ -4,31 +4,17 @@ import quadprog
 import random
 from tqdm.auto import tqdm
 from deepspeed.utils import safe_get_full_grad
+from model.base_model import CL_Base_Model
 
 
-class GEM(object):
-    def __init__(self,
-                 model,
-                 task_list,
-                 args,
-                 a_gem_n=10
-                 ):
-        """
-        Implements A-GEM
-        :param model:
-        :param batch_list:
-        :param use_slots:
-        :param use_a_gem:
-        """
-        self.model = model
-        self.task_list = task_list
-        self.a_gem_n = a_gem_n
-        self.args = args
+class GEM(CL_Base_Model):
+    def __init__(self):
+        super().__init__()
         self.observed_tasks = []
         self.grad_dims = [] #存储每层的参数数量
         for name, param in self.model.named_parameters():
             self.grad_dims.append(param.data.numel())
-        self.n_tasks = len(task_list.keys())
+        self.n_tasks = len(self.task_list.keys())
         self.grads = torch.zeros([sum(self.grad_dims), self.n_tasks], dtype=torch.bfloat16).cuda()  #存储每个任务的梯度
         self.cnt=len(self.grad_dims)
 
@@ -43,16 +29,15 @@ class GEM(object):
             tid: task id
         """
         # store the gradients
-        grads[:, tid].fill_(0.0)
+        # grads[:, tid].fill_(0.0)
         cnt = 0
         for name, param in self.model.named_parameters():
             hp_grad = safe_get_full_grad(param)
-            if self.args.global_rank<=0:
-                if hp_grad is not None:
-                    beg = 0 if cnt == 0 else sum(grad_dims[:cnt])
-                    en = sum(grad_dims[:cnt + 1])
-                    grads[beg: en, tid].copy_(torch.nan_to_num(hp_grad.data.view(-1),nan=0))
-                cnt += 1
+            if hp_grad is not None:
+                beg = 0 if cnt == 0 else sum(grad_dims[:cnt])
+                en = sum(grad_dims[:cnt + 1])
+                grads[beg: en, tid].copy_(torch.nan_to_num(hp_grad.data.view(-1),nan=0))
+            cnt += 1
                 
     def project2cone2(self,gradient,indx, margin=0.5, eps=1e-3):
         """
@@ -166,12 +151,4 @@ class GEM(object):
 
 
 
-    
-    # Train model continually
-    def train_continual(self,
-                        epochs=40,
-                        ):
-        self.observed_tasks.append(0)
-        for num, task in enumerate(self.task_list):
-            self.train_one_task(task, num, epochs)
             

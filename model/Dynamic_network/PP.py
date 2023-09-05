@@ -7,6 +7,7 @@ import logging, os, argparse
 
 from copy import deepcopy
 from transformers import AdamW
+from model.base_model import CL_Base_Model
 
 
 class ResMLP(torch.nn.Module):
@@ -29,10 +30,10 @@ class ResMLP(torch.nn.Module):
         if module_type=='MLP1':
             # if layer_norm:
             self.module = nn.Sequential(
-                nn.Linear(emb_dimension, bottleneck_size, dtype=torch.float16),
+                nn.Linear(emb_dimension, bottleneck_size, dtype=torch.bfloat16),
                 nn.ReLU(),
-                nn.Linear(bottleneck_size, emb_dimension, dtype=torch.float16),
-                nn.LayerNorm(emb_dimension, dtype=torch.float16),
+                nn.Linear(bottleneck_size, emb_dimension, dtype=torch.bfloat16),
+                nn.LayerNorm(emb_dimension, dtype=torch.bfloat16),
             )
             # else:
             #     self.module = nn.Sequential(
@@ -67,13 +68,9 @@ class ResMLP(torch.nn.Module):
 
 
 
-class PP:
+class PP(CL_Base_Model):
     def __init__(self,
-                 model,
-                 tokenizer,
-                 optimizer,
-                 task_list,
-                 args,
+                 model, tokenizer, optimizer, task_list, args,
                  prefix_len=20,
                  prefix_path=None, # path to the pre-trained progressive prompt
                  freeze_weights=True,
@@ -134,15 +131,13 @@ class PP:
         
         
         """
-        self.args = args
-        self.optimizer = optimizer
-        self.task_list = task_list
+        super().__init__(model, tokenizer, optimizer, task_list, args)
         self.freeze_weights = freeze_weights
         self.seq_len = seq_len
         self.early_stopping = early_stopping
-        self.embed_tokens_dim = args.embed_tokens_dim
-        self.embed_tokens_length = args.embed_tokens_length
-        self.embed_tokens = args.embed_tokens
+        self.embed_tokens_dim = self.args.embed_tokens_dim
+        self.embed_tokens_length = self.args.embed_tokens_length
+        self.embed_tokens = self.args.embed_tokens
         self.prefix_MLP = prefix_MLP
 
 
@@ -150,9 +145,6 @@ class PP:
             self.device = torch.device("cuda")
         else:
             self.device = torch.device("cpu")
-
-        self.model = model
-        self.tokenizer = tokenizer
         # Freezing model weights for prompt tuning
         if freeze_weights:
             print('Freezing weights')
@@ -163,25 +155,10 @@ class PP:
         if prefix_len>0:
             if prefix_path==None:
                 self.previous_prompts = torch.zeros([0, self.model.model.prompt.shape[1]],
-                                                    requires_grad=False, dtype=torch.float16).to(self.device)
+                                                    requires_grad=False, dtype=torch.bfloat16).to(self.device)
             else: # initializing previous prompts from the path
                 print('Using pre-trained progressive prompt - ' + prefix_path)
                 self.previous_prompts = torch.tensor(np.load(prefix_path), requires_grad = False).to(self.device)
-        # self.model.model.to(self.device)
-        # Create MLP (if prompt re-parameterization is requested)
-        # if prefix_MLP!=None:
-            # self.get_MLP(prefix_MLP, bottleneck_size) # adds prompt MLP reparametrization (and puts to cuda)
-
-
-        # Create best prompt/model copy for early stopping
-        if self.early_stopping:
-            if self.prefix_len>0:
-                # prompt tuning
-                self.best_prompt = self.model.model.prompt.detach().cpu().numpy()
-            else:
-                # model tuning
-                self.best_model = deepcopy(self.model.state_dict()) # saving best model
-            self.best_acc = 0.0 # best avg accuracy on seen tasks
     
     # Create MLP for prompt tuning
     def get_MLP(self, prefix_MLP, bottleneck_size, layer_norm=False):
@@ -199,64 +176,22 @@ class PP:
             for t in self.task_list:
                 self.prefix_MLPs[t].to(self.device)
 
-    
-    # Initialize new task prompt from random vocab. tokens
-    def init_new_prompt(self, prompt_len):
-        model = self.model
-        N = self.embed_tokens_length
-        prompt_weigths = []
-
-        for i in range(prompt_len):
-            with torch.no_grad():
-                j = np.random.randint(N) # random token
-                w = deepcopy(self.args.embed_tokens.weight[j].detach().cpu().numpy())
-                prompt_weigths.append(w)
-        prompt_weigths = np.array(prompt_weigths)
-        return prompt_weigths
 
     
     # Concatenate newly learned prompt to the joint "Progressive Prompts"
     def progress_previous_prompts(self, task_num=None):
-        if self.early_stopping: # use best val acc prompt & MLP
-            new_prompt = self.best_prompt # prompt has already passed MLP
-        else: # use last prompt
-            if task_num!=None and self.prefix_MLP!=None:
-                new_prompt = self.model.model.mlps[task_num](self.model.model.prompt)
-            else:
-                new_prompt = self.model.model.prompt
-            new_prompt = new_prompt.detach().cpu().numpy()
 
-        new_prompt = torch.tensor(new_prompt, requires_grad = False).to(self.device)
+
+        if task_num!=None and self.prefix_MLP!=None:
+            new_prompt = self.model.model.mlps[task_num](self.model.model.prompt)
+        else:
+            new_prompt = self.model.model.prompt
+            # new_prompt = new_prompt.detach().cpu().numpy()
+
+        # new_prompt = torch.tensor(new_prompt, requires_grad = False).to(self.device)
         self.previous_prompts = torch.concat([new_prompt, self.previous_prompts], axis=0)
         print('Updated progressive prompts ', self.previous_prompts.shape)
     
-    
-    # Update best prompt/model based on val. score
-    def update_best_model(self, acc, task=None):
-        if acc>self.best_acc:
-            # getting best prompt
-            if self.prefix_len>0:
-                best_prompt = self.model.model.prompt
-                if self.prefix_MLP!=None:
-                    self.prefix_MLP[task].eval()
-                    best_prompt = self.prefix_MLP[task](best_prompt)
-
-                self.best_prompt = best_prompt.detach().cpu().numpy()
-
-            # getting best model
-            else:
-                self.best_model = deepcopy(self.model.state_dict()) # saving best model
-            self.best_acc = acc # best avg accuracy on seen tasks
-
-
-    # Restrieve best-performing model (for early stopping)
-    def restore_best_model(self):
-        if self.prefix_len>0:
-            self.model.model.prompt = nn.Parameter(torch.tensor(self.best_prompt,
-                                                          requires_grad=True))
-        else:
-            self.model.load_state_dict(deepcopy(self.best_model))
-            print("restored best model")
 
     # Perform one train step for prompt tuning (following Lester et al.)
     def train_step_lester(self,
@@ -268,7 +203,6 @@ class PP:
         if embed_prompt:
             assert task!=None
             mlp = self.model.model.mlps[task_num]
-        tokenizer = self.tokenizer
 
         batch = {k: batch[k].to(self.device) for k in batch}
         lm_labels = batch["labels"]
@@ -289,15 +223,19 @@ class PP:
         if progressive:
             inputs_embeds = torch.concat([prompt.repeat(k, 1, 1),
                                           self.previous_prompts.repeat(k, 1, 1),
-                                          inputs_embeds], axis=1)[:,:self.seq_len]
+                                          inputs_embeds], axis=1)
             full_prefix_len = self.previous_prompts.shape[0] + prompt.shape[0] # prefix including all previous tasks
         else:
             inputs_embeds = torch.concat([prompt.repeat(k, 1, 1),
-                                          inputs_embeds], axis=1)[:,:self.seq_len]
+                                          inputs_embeds], axis=1)
             full_prefix_len = prompt.shape[0]
-
+            
         source_mask_updated = torch.concat((batch["attention_mask"][0][0].repeat(k,full_prefix_len),
-                                             batch["attention_mask"]), axis=1)[:,:self.seq_len]
+                                             batch["attention_mask"]), axis=1)
+
+        lm_labels = torch.concat((lm_labels[0][0].repeat(k,inputs_embeds.shape[1]-lm_labels.shape[1]),lm_labels),axis=1)
+
+        
         '''
         encoder_outputs = model.encoder(
                                 attention_mask=source_mask_updated,
@@ -348,12 +286,9 @@ class PP:
     # Perform training on a single task
     def train_one_task(self,
                        task,
-                       epochs,
                        task_num,
-                       progressive=True,
-                       eval_every_N=1,
-                       eval_on_all_tasks=False,
-                       data_replay_freq=-1):
+                       epochs,
+                       progressive=True):
         
         #将新的prompt加入优化器
         # old_prompt = deepcopy(self.model.model.prompt)
@@ -393,8 +328,8 @@ class PP:
                 mlp.train()
 
             for step, batch in enumerate(tqdm(dataloader_train)):
+                del batch['sources']
                 batch = {k:batch[k].to('cuda') for k in batch}
-
                 if self.prefix_len>0: # prompt tuning
                     loss = self.train_step_lester(batch,
                                                   task=task if self.prefix_MLP!=None else None,
@@ -430,37 +365,6 @@ class PP:
             self.progress_previous_prompts(task=task)
             # model.model.prompt.data = deepcopy(old_prompt.data)
 
-        else:
-            if self.early_stopping:
-                self.restore_best_model()
-        return val_acc
-
-
-    
-    # Train model continually
-    def train_continual(self,
-                        epochs=40,
-                        save_path=None,
-                        progressive=True,
-                        eval_every_N=1,
-                        test_eval_after_every_task=False, # only needed for methods with catastrophic forgetting
-                        data_replay_freq=-1,
-                        ):
-
-        for num, task in enumerate(self.task_list):
-            eval_on_all_tasks = False if progressive or len(self.task_list)==1 else True
-            eval_frq = eval_every_N if not eval_on_all_tasks else int(epochs//3)
-            val_acc = self.train_one_task(task, epochs, num,
-                                          progressive=progressive,
-                                          eval_every_N=eval_frq,
-                                          #eval_on_all_tasks=False, # too slow
-                                          data_replay_freq=data_replay_freq,
-                                          eval_on_all_tasks=eval_on_all_tasks,
-                                          )
-            print(task, val_acc)
-
-
-
 def convert_model(model, args):
     
     def init_new_prompt(prompt_len):
@@ -472,7 +376,7 @@ def convert_model(model, args):
                 j = np.random.randint(N) # random token
                 w = deepcopy(args.embed_tokens.weight[j].detach().cpu().numpy())
                 prompt_weigths.append(w/100)
-                prompt_weigths.append(w)
+                # prompt_weigths.append(w)
 
         prompt_weigths = np.array(prompt_weigths)
         return prompt_weigths
