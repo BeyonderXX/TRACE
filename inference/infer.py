@@ -45,7 +45,7 @@ from utils.utils import print_rank_0, to_device, save_hf_format, set_random_seed
 from utils.ds_utils import get_train_ds_config
 from utils.model.model_utils import create_hf_model
 
-from evaluations import eval_ScienceQA, eval_MeetingBank, eval_PapyrusF, eval_CStance, eval_Py150 # to be continued
+from evaluations import eval_ScienceQA, eval_MeetingBank, eval_PapyrusF, eval_CStance, eval_Py150, eval_FOMC, eval_NumGLUE_cm, eval_NumGLUE_ds # to be continued
 
 
 
@@ -289,6 +289,12 @@ def main():
         evaluation_result = eval_PapyrusF.eval(predicted_sequences, ground_truths)
     elif args.inference_task == "Py150":
         evaluation_result = eval_Py150.eval(predicted_sequences, ground_truths
+    elif args.inference_task == "FOMC":
+        evaluation_result = eval_FOMC.eval(predicted_sequences, ground_truths)
+    elif args.inference_task == "NumGLUE-cm":
+        evaluation_result = eval_NumGLUE_cm.eval(predicted_sequences, ground_truths)
+    elif args.inference_task == "NumGLUE-ds":
+        evaluation_result = eval_NumGLUE_ds.eval(predicted_sequences, ground_truths)
     else:
         evaluation_result = {}                                        
     
