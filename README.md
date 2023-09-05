@@ -117,7 +117,7 @@ deepspeed --master_port 51419 main.py  --data_path Anthropic/hh-rlhf  --model_na
 同样支持debug模式
 
 ```
-deepspeed --num_gpus 2 --master_port 51419 infer.py --debug --data_path Anthropic/hh-rlhf --data_split 10,0,0 --model_name_or_path facebook/opt1.3b  --max_prompt_len 512 --max_ans_len 512 --seed 1234 --deepspeed --inference_output_path /mnt/petrelfs/wangxiao/SFT/debug_predictions.csv > inference_debug.log 2>&1 &
+deepspeed --num_gpus 2 --master_port 51419 infer.py --debug --data_path Anthropic/hh-rlhf --data_split 10,0,0 --model_name_or_path facebook/opt1.3b  --max_prompt_len 512 --max_ans_len 512 --seed 1234 --deepspeed --inference_task --inference_output_path /mnt/petrelfs/wangxiao/SFT/debug_predictions.csv > inference_debug.log 2>&1 &
 ```
 
 
