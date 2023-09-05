@@ -8,13 +8,13 @@ from model.base_model import CL_Base_Model
 
 
 class GEM(CL_Base_Model):
-    def __init__(self):
-        super().__init__()
+    def __init__(self,model, tokenizer, optimizer, train_task_list, eval_task_list, args):
+        super().__init__(model, tokenizer, optimizer, train_task_list, eval_task_list, args)
         self.observed_tasks = []
         self.grad_dims = [] #存储每层的参数数量
         for name, param in self.model.named_parameters():
             self.grad_dims.append(param.data.numel())
-        self.n_tasks = len(self.task_list.keys())
+        self.n_tasks = len(self.train_task_list.keys())
         self.grads = torch.zeros([sum(self.grad_dims), self.n_tasks], dtype=torch.bfloat16).cuda()  #存储每个任务的梯度
         self.cnt=len(self.grad_dims)
 
@@ -109,7 +109,7 @@ class GEM(CL_Base_Model):
         #                         grad_dims=self.grad_dims,
         #                         tid=i_task).cuda()
 
-        dataloader_train = self.task_list[task]
+        dataloader_train = self.train_task_list[task]
         indx = torch.cuda.LongTensor(self.observed_tasks[:-1]) 
         if indx.shape[0]!=0:
             for name, params in self.model.named_parameters():

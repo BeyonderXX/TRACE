@@ -70,7 +70,7 @@ class ResMLP(torch.nn.Module):
 
 class PP(CL_Base_Model):
     def __init__(self,
-                 model, tokenizer, optimizer, task_list, args,
+                 model, tokenizer, optimizer, train_task_list, eval_task_list, args,
                  prefix_len=20,
                  prefix_path=None, # path to the pre-trained progressive prompt
                  freeze_weights=True,
@@ -131,7 +131,7 @@ class PP(CL_Base_Model):
         
         
         """
-        super().__init__(model, tokenizer, optimizer, task_list, args)
+        super().__init__(model, tokenizer, optimizer, train_task_list, eval_task_list, args)
         self.freeze_weights = freeze_weights
         self.seq_len = seq_len
         self.early_stopping = early_stopping
@@ -160,24 +160,7 @@ class PP(CL_Base_Model):
                 print('Using pre-trained progressive prompt - ' + prefix_path)
                 self.previous_prompts = torch.tensor(np.load(prefix_path), requires_grad = False).to(self.device)
     
-    # Create MLP for prompt tuning
-    def get_MLP(self, prefix_MLP, bottleneck_size, layer_norm=False):
-        if prefix_MLP == 'None':
-            self.prefix_MLPs = None
-        else:
-            print('Using MLP reparametrization with bottleneck = ', bottleneck_size)
-            N = self.embed_tokens_dim
 
-            self.prefix_MLPs = {t: ResMLP(bottleneck_size=bottleneck_size,
-                                          module_type=prefix_MLP,
-                                          #layer_norm=layer_norm,
-                                          emb_dimension=N) for t in self.task_list}
-        if self.prefix_MLPs!=None:
-            for t in self.task_list:
-                self.prefix_MLPs[t].to(self.device)
-
-
-    
     # Concatenate newly learned prompt to the joint "Progressive Prompts"
     def progress_previous_prompts(self, task_num=None):
 
@@ -302,7 +285,7 @@ class PP(CL_Base_Model):
         if self.prefix_MLP!=None:
             print('Freezing all MLPs except for ', task)
             mlp = self.model.model.mlps[task_num]
-            self.freeze_unfreeze_mlps([x for x in range(len(self.task_list)) if x!=task_num], requires_grad=False)
+            self.freeze_unfreeze_mlps([x for x in range(len(self.train_task_list)) if x!=task_num], requires_grad=False)
             self.freeze_unfreeze_mlps([task_num], requires_grad=True) # unfreezing current task
 
         model = self.model
@@ -315,7 +298,7 @@ class PP(CL_Base_Model):
         # model.model.prompt.requires_grad = True
         # model.model.to(self.device)
 
-        dataloader_train = self.task_list[task]
+        dataloader_train = self.train_task_list[task]
         total_steps = self.args.num_train_epochs * len(dataloader_train)
         progress_bar = tqdm(total=total_steps, leave=True, disable=(self.args.global_rank != 0))
 

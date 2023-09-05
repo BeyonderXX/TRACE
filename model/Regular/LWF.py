@@ -6,16 +6,13 @@ from tqdm.auto import tqdm
 import copy
 import json
 import torch.nn.functional as F
+from model.base_model import CL_Base_Model
 
-class LwF(object):
-    def __init__(self,
-                 model,
-                 task_list,
-                 args,
+class LwF(CL_Base_Model):
+    def __init__(self,model, tokenizer, optimizer, train_task_list, eval_task_list, args
                  ):
-        self.model = model
-        self.task_list = task_list
-        self.args = args
+        super().__init__(model, tokenizer, optimizer, train_task_list, eval_task_list, args)
+
             
     def train_step(self,
                     batch):
@@ -38,7 +35,7 @@ class LwF(object):
         return kd_loss
     
     def new_input_old_model_logits(self, i_task):
-        train_dataloader = self.task_list[i_task+1]
+        train_dataloader = self.train_task_list[i_task+1]
         new_task_logits = {}
         for step, batch in enumerate(tqdm(train_dataloader)):
             del batch['sources']
@@ -63,7 +60,7 @@ class LwF(object):
             with open(self.args.output_dir+"/LwF/{}.json") as f:
                 prev_logits = json.load(f)
 
-        dataloader_train = self.task_list[task]
+        dataloader_train = self.train_task_list[task]
         for epoch in range(epochs):
             print(epoch)
             self.model.train()
@@ -86,17 +83,7 @@ class LwF(object):
                 self.model.backward(loss)
                 self.model.step()
                 
-        if i_task+1 < len(self.task_list):
+        if i_task+1 < len(self.train_task_list):
             self.new_input_old_model_logits(i_task)
 
-
-
-    
-    # Train model continually
-    def train_continual(self,
-                        epochs=40,
-                        ):
-        self.observed_tasks.append(0)
-        for num, task in enumerate(self.task_list):
-            self.train_one_task(task, num, epochs)
             

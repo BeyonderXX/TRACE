@@ -6,12 +6,14 @@ class CL_Base_Model:
                  model,
                  tokenizer,
                  optimizer,
-                 task_list,
+                 train_task_list,
+                 eval_task_list,
                  args):
         self.model = model
         self.tokenizer = tokenizer
         self.optimizer = optimizer
-        self.task_list = task_list
+        self.train_task_list = train_task_list
+        self.eval_task_list = eval_task_list
         self.args = args
         
         
@@ -20,9 +22,11 @@ class CL_Base_Model:
     
     
     def train_continual(self):
-        for num, task in enumerate(self.task_list):
-            self.train_one_task(task, num, self.args.num_train_epochs)
+        for i_task, task in enumerate(self.train_task_list):
+            self.train_one_task(task, i_task, self.args.num_train_epochs)
+            self.evaluate(i_task)
             
             
-    def evaluate(self, cur_task):
+    def evaluate(self, i_task):
+        #评估，不同的dataset对应不同的metrics
         pass

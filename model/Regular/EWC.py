@@ -9,8 +9,8 @@ from model.base_model import CL_Base_Model
 
 
 class EWC(CL_Base_Model):
-    def __init__(self):
-        super().__init__()
+    def __init__(self,model, tokenizer, optimizer, train_task_list, eval_task_list, args):
+        super().__init__(model, tokenizer, optimizer, train_task_list, eval_task_list, args)
         self.device="cuda"
         self.params = {n: p for n, p in self.model.named_parameters() if p.requires_grad}
         self._previous_params = {}
@@ -90,7 +90,7 @@ class EWC(CL_Base_Model):
 
         print('task = ', task)
 
-        dataloader_train = self.task_list[task]
+        dataloader_train = self.train_task_list[task]
         self.train_length = len(dataloader_train)
         total_steps = self.args.num_train_epochs * len(dataloader_train)
         progress_bar = tqdm(total=total_steps, leave=True, disable=(self.args.global_rank != 0))
@@ -121,7 +121,7 @@ class EWC(CL_Base_Model):
         #在训练之前确定梯度
         self.retain_grad()
 
-        for num, task in enumerate(self.task_list):
+        for num, task in enumerate(self.train_task_list):
             self.task_num=num
             self.train_one_task(task, self.args.num_train_epochs)
             self._regular_fisher()  

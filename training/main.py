@@ -40,10 +40,9 @@ from utils.module.lora import convert_linear_layer_to_lora, convert_lora_to_line
 from utils.model.model_utils import create_hf_model
 
 from model.Dynamic_network.PP import PP, convert_model
-from model.Regular.LwF import LwF
-from model.Regular.EWC import EWC
-from model.Regular.GEM import GEM
-from model.Regular.OGD import OGD
+
+
+from params import Method2Class, AllDatasetName
 
 
 # TODO, check support for OPT and llama
@@ -57,6 +56,10 @@ def parse_args():
                         type=str,
                         default='Dahoas/rm-static',
                         help='Path to the training dataset, a single data path.')
+    parser.add_argument('--dataset_name',
+                        type=str,
+                        default='all',
+                        help='Dataset to be used.')
     parser.add_argument(
         '--data_output_path',
         type=str,
@@ -239,39 +242,51 @@ def main():
                             disable_dropout=args.disable_dropout,
                             debug=args.debug)
 
-    # Prepare the data
-    train_dataset, eval_dataset = create_prompt_dataset(
-        args.local_rank,
-        args.data_path,
-        args.data_output_path,
-        args.seed
-    )
+    train_task_list = {}
+    eval_task_list = {}
 
-    # DataLoaders creation:
-    if args.local_rank == -1:
-        train_sampler = RandomSampler(train_dataset)
-        eval_sampler = SequentialSampler(eval_dataset)
+    if args.dataset_name == "all":
+        Datasets = AllDatasetName
     else:
-        train_sampler = DistributedSampler(train_dataset)
-        eval_sampler = DistributedSampler(eval_dataset)
+        Datasets = args.dataset_name
+    for dataset in Datasets:
+        dataset_path = os.path.join(args.data_path,dataset)
+        # Prepare the data
+        train_dataset, eval_dataset = create_prompt_dataset(
+            args.local_rank,
+            dataset_path,
+            args.data_output_path,
+            args.seed
+        )
 
-    data_collator  = DataCollator(
-        tokenizer,
-        padding="longest",
-        max_prompt_len=args.max_prompt_len,
-        max_ans_len=args.max_ans_len,
-        pad_to_multiple_of=8,
-        inference=False
-    )
+        # DataLoaders creation:
+        if args.local_rank == -1:
+            train_sampler = RandomSampler(train_dataset)
+            eval_sampler = SequentialSampler(eval_dataset)
+        else:
+            train_sampler = DistributedSampler(train_dataset)
+            eval_sampler = DistributedSampler(eval_dataset)
 
-    train_dataloader = DataLoader(train_dataset,
-                                  collate_fn=data_collator,
-                                  sampler=train_sampler,
-                                  batch_size=args.per_device_train_batch_size)
-    eval_dataloader = DataLoader(eval_dataset,
-                                 collate_fn=data_collator,
-                                 sampler=eval_sampler,
-                                 batch_size=args.per_device_eval_batch_size)
+        data_collator  = DataCollator(
+            tokenizer,
+            padding="longest",
+            max_prompt_len=args.max_prompt_len,
+            max_ans_len=args.max_ans_len,
+            pad_to_multiple_of=8,
+            inference=False
+        )
+                
+
+        train_dataloader = DataLoader(train_dataset,
+                                    collate_fn=data_collator,
+                                    sampler=train_sampler,
+                                    batch_size=args.per_device_train_batch_size)
+        eval_dataloader = DataLoader(eval_dataset,
+                                    collate_fn=data_collator,
+                                    sampler=eval_sampler,
+                                    batch_size=args.per_device_eval_batch_size)
+        train_task_list[dataset] = train_dataloader
+        eval_task_list[dataset] = eval_dataloader
 
 
     def evaluation(model, eval_dataloader):
@@ -319,10 +334,6 @@ def main():
         
         return optimizer, lr_scheduler
     
-    if args.debug:
-        task_list={}
-        task_list['task1']=train_dataloader
-        task_list['task2']=train_dataloader
     if args.CL_method=="PP":
         if "opt" in args.model_name_or_path.lower():
             embed_tokens_shape = model.model.decoder.embed_tokens.weight.shape
@@ -332,7 +343,7 @@ def main():
             args.embed_tokens_length = embed_tokens_shape[0]
             args.embed_tokens = embed_tokens
         args.prefix_len = 20
-        args.task_length = len(task_list)
+        args.task_length = len(train_task_list)
         model = convert_model(model, args)
     
         
@@ -358,13 +369,9 @@ def main():
     # print_rank_0(f"ppl: {perplexity}", args.global_rank)
 
     # Initialize the global progress bar
-    method2class = {"PP":PP,
-                    "EWC":EWC,
-                    "GEM":GEM,
-                    "OGD":OGD,
-                    "LwF":LwF}
-    if args.CL_method in method2class.keys():
-        CL_Trainer = method2class[args.CL_method](model, tokenizer, optimizer, task_list, args)
+
+    if args.CL_method in Method2Class.keys():
+        CL_Trainer = Method2Class[args.CL_method](model, tokenizer, optimizer, train_task_list, eval_task_list, args)
         CL_Trainer.train_continual()
         
     else:

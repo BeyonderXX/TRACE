@@ -33,8 +33,8 @@ def orthonormalize(vectors, normalize=True, start_idx=0):
 
 class OGD(CL_Base_Model):
     
-    def __init__(self, max_memories=50):
-        super().__init__()
+    def __init__(self, model, tokenizer, optimizer, train_task_list, eval_task_list, args,max_memories=50):
+        super().__init__(model, tokenizer, optimizer, train_task_list, eval_task_list, args)
         n_params = count_parameter(self.model)
         # if args.debug: #debug
         #     self.ogd_basis = torch.ones(n_params, 10, dtype=torch.bfloat16).to('cuda')
@@ -105,7 +105,7 @@ class OGD(CL_Base_Model):
 
         # print('task = ', task)
 
-        dataloader_train = self.task_list[task]
+        dataloader_train = self.train_task_list[task]
         
         if i_task!=0:
             for name, params in self.model.named_parameters():

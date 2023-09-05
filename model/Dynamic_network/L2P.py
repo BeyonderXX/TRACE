@@ -4,13 +4,12 @@ import torch
 import torch.utils.data
 from tqdm.auto import tqdm
 from torch import nn
+from model.base_model import CL_Base_Model
 
 
 class L2P:
     
-    def __init__(self, 
-                 model, 
-                 task_list,
+    def __init__(self, model, tokenizer, optimizer, train_task_list, eval_task_list, args,
                  prompt_length=5,
                  embedding_key='mean',
                  prompt_init='uniform',
@@ -18,10 +17,8 @@ class L2P:
                  top_k=3,
                  batchwise_prompt=False
                  ):
+        super().__init__(model, tokenizer, optimizer, train_task_list, eval_task_list, args)
         
-        
-        self.model = model
-        self.task_list = task_list
         self.prompt_length = prompt_length
         self.embed_dim = self.model.model.embed_tokens.weight.shape[1]
         self.embedding_key = embedding_key
