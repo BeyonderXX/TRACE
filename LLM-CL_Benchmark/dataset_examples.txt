@@ -1,0 +1,141 @@
+##Format##
+# prompt #
+#--------#
+# answer #
+##########
+
+
+
+DATASET1 -> C-STANCE:
+
+判断以下文本对指定对象的态度。输出支持、反对或中立。
+文本：
+嘛六记跟张兰没关系，她现在就是一个网络直播带货红人，她是在卖嘛六记的东西，她本人跟嘛六记生意毫无瓜葛，没有参与嘛六记任何管理也没有股权，只是汪小菲是嘛六记的一个小股东而已，嘛六记很多股东，事实就是如此！所以她只是打着嘛六记的招牌带货，不知道的还以为嘛六记有她的股份！
+对象：
+张兰带货嘛六记
+态度：
+---------
+支持
+
+
+
+DATASET2 -> FOMC:
+
+What is the monetary policy stance for the following text? Please answer 'dovish', 'hawkish' or 'neutral'.
+Text:
+During the past several years, workers across the wage distribution--not just at the upper end--have seen noticeable increases in the inflation-adjusted value of their wages.
+Stance:
+---------
+hawkish
+
+
+
+DATASET3 -> MeetingBank:
+
+Write a summary of the following meeting transcripts.
+Meeting transcripts:
+Thank you. Moving on. We have three hearings. We'll start with our first hearing. Item 17.Communication from City Attorney. Recommendation to receive supporting documentation into the record. The hearing and declared ordinance relating to the temporary limitation on the issuance of building or construction permits for new residential standalone construction along commercial and transportation corridors in West Long Beach.Read the first time and later the next regular meeting of the City Council for final reading and declare the urgency thereof and declaring this ordinance shall take effect immediately. District seven And there are two votes required for this item.Think it was Gordon turning over to.Mike May's from the city attorney's office. I can provide a short staff report if the council desires.Please. Go ahead, Mike.Yeah. You all remember that on May 18th, the Council adopted a minute order pursuant to an agenda request from District seven, which set in motion this moratorium process that we have here tonight on this form, the ordinance before you formalizes.The actual moratorium in the area that Monique.Just described for you on Willow Street and Santa Fe Avenue in the west side of Long Beach. This will establish a 12 month moratorium period. And during that time, no building permits will be issued for standalone new residential construction in the area of concern.And during this 12 month period.The matter will be referred to the Planning Commission. And the planning staff to initiate a study of.Potential amendments to the existing zoning.And building regulations in the city to have them more closely aligned with the more recently adopted land use and urban design elements of the city's general plan. If anyone should have any questions, I'd be more than happy to try and answer them.Thank you. Is there any public comment for this hearing?No. There's no public comment for this item.Canterbury Ranga.Sorry. Still getting adjusted to being back in the chamber. No real comment just to thank staff for their great work on this and we're looking forward to having some positive results at the end of the period.Downtown Boston.A second emotion.Thank you. We're going to do a roll call vote, please.District one. My district to my district three. I. District four. I. District five. I. District six. I. District seven.I.District eight. District nine.I.Monique, and we'll need another vote on the urgency.Thank you.Do another vote on the urgency, please, echoing emotion in the second, countering your rank as a motion. Second by. Can I get a second, please? Captain Boston.Council District one.I.Council, District two I Council, District three i District four i district by district six i. District seven i. District eight District nine I. Motion carries.
+Summary:
+---------
+Recommendation to declare ordinance imposing interim regulations (moratorium) in accordance with Chapter 21.50 of the Long Beach Municipal Code on the issuance of building, construction, occupancy permits, or other entitlements for new stand-alone residential construction along transportation corridors in areas that are designated by the 2019 General Plan Land Use Element Update as the Neighborhood-Serving Corridors or Centers PlaceType on Willow Street, west of the I-710 freeway to the City terminus; and Santa Fe Avenue, between Pacific Coast Highway on the south and Wardlow Road on the north, in the West Long Beach area of the City; declaring the urgency thereof; and declaring that this ordinance shall take effect immediately, read and adopt as read.  (District 7)  (Emergency Ordinance No. ORD-21-0020)
+
+
+
+DATASET4 -> Papyrus-f:
+
+Extract the key words of the following paper according to its title and abstract. Give your answer in French.
+Title:
+Les initiatives de prise en charge adaptée des Premières Nations et Inuit judiciarisés au Canada : quelques pistes de réflexion
+Abstract:
+La prise en charge des Autochtones par les autorités judiciaires canadiennes est reconnue comme problématique à divers niveaux notamment en termes de surreprésentation en détention. Basé sur une revue de littérature, cet article propose une analyse des initiatives menées par les autorités correctionnelles et certaines communautés autochtones pour mettre à la disposition des justiciables autochtones des programmes mieux adaptés à leurs réalités et favorisant ainsi leur réintégration sociocommunautaire. Si ces initiatives sont significatives dans le cheminement des Premières Nations et Inuit judiciarisées, plusieurs enjeux et questionnements restent importants à soulever et ce d’autant plus qu’elles ne répondent pas au problème de départ, soit celui de la sur-pénalisation des Autochtones au Canada.
+Key words:
+---------
+Premières nations et Inuit , Programmes adaptés , Réintégration sociocommunautaire
+
+
+
+DATASET5 -> Py150:
+
+Complete the next line of the following Python code.
+<s> import msgpack <EOL> import gevent . pool <EOL> import gevent . queue <EOL> import gevent . event <EOL> import gevent . local <EOL> import gevent . lock <EOL> import logging <EOL> import sys <EOL> import gevent_zmq as zmq <EOL> from . exceptions import TimeoutExpired <EOL> from . context import Context <EOL> from . channel_base import ChannelBase <EOL> if sys . version_info < ( <NUM_LIT:2> , <NUM_LIT:7> ) : <EOL> def get_pyzmq_frame_buffer ( frame ) : <EOL> return frame . buffer [ : ] <EOL> else : <EOL> def get_pyzmq_frame_buffer ( frame ) : <EOL> return frame . buffer <EOL> logger = logging . getLogger ( __name__ ) <EOL> class SequentialSender ( object ) : <EOL> def __init__ ( self , socket ) : <EOL> self . _socket = socket <EOL> def _send ( self , parts ) : <EOL> e = None <EOL> for i in xrange ( len ( parts ) - <NUM_LIT:1> ) : <EOL> try : <EOL> self . _socket . send ( parts [ i ] , copy = False , flags = zmq . SNDMORE ) <EOL> except ( gevent . GreenletExit , gevent . Timeout ) as e : <EOL> if i == <NUM_LIT:0> : <EOL> raise <EOL> self . _socket . send ( parts [ i ] , copy = False , flags = zmq . SNDMORE ) <EOL> try : <EOL> self . _socket . send ( parts [ - <NUM_LIT:1> ] , copy = False ) <EOL> except ( gevent . GreenletExit , gevent . Timeout ) as e : <EOL> self . _socket . send ( parts [ - <NUM_LIT:1> ] , copy = False ) <EOL> if e : <EOL> raise e <EOL> def __call__ ( self , parts , timeout = None ) : <EOL> if timeout : <EOL> with gevent . Timeout ( timeout ) : <EOL> self . _send ( parts ) <EOL> else : <EOL> self . _send ( parts ) <EOL> class SequentialReceiver ( object ) : <EOL> def __init__ ( self , socket ) : <EOL> self . _socket = socket <EOL> def _recv ( self ) : <EOL> e = None <EOL> parts = [ ] <EOL> while True : <EOL> try : <EOL> part = self . _socket . recv ( copy = False ) <EOL> except ( gevent . GreenletExit , gevent . Timeout ) as e : <EOL> if len ( parts ) == <NUM_LIT:0> : <EOL> raise <EOL> part = self . _socket . recv ( copy = False ) <EOL> parts . append ( part ) <EOL> if not part . more : <EOL> break <EOL> if e : <EOL> raise e <EOL> return parts <EOL> def __call__ ( self , timeout = None ) : <EOL> if timeout : <EOL> with gevent . Timeout ( timeout ) : <EOL> return self . _recv ( ) <EOL> else : <EOL> return self . _recv ( ) <EOL> class Sender ( SequentialSender ) : <EOL> def __init__ ( self , socket ) : <EOL> self . _socket = socket <EOL> self . _send_queue = gevent . queue . Channel ( ) <EOL> self . _send_task = gevent . spawn ( self . _sender ) <EOL> def close ( self ) : <EOL> if self . _send_task : <EOL> self . _send_task . kill ( ) <EOL> def _sender ( self ) : <EOL> for parts in self . _send_queue : <EOL> super ( Sender , self ) . _send ( parts ) <EOL> def __call__ ( self , parts , timeout = None ) : <EOL> try : <EOL> self . _send_queue . put ( parts , timeout = timeout ) <EOL> except gevent . queue . Full : <EOL> raise TimeoutExpired ( timeout ) <EOL> class Receiver ( SequentialReceiver ) : <EOL> def __init__ ( self , socket ) : <EOL> self . _socket = socket <EOL> self . _recv_queue = gevent . queue . Channel ( ) <EOL> self . _recv_task = gevent . spawn ( self . _recver ) <EOL> def close ( self ) : <EOL> if self . _recv_task : <EOL> self . _recv_task . kill ( ) <EOL> self . _recv_queue = None <EOL> def _recver ( self ) : <EOL> while True : <EOL> parts = super ( Receiver , self ) . _recv ( ) <EOL> self . _recv_queue . put ( parts ) <EOL> def __call__ ( self , timeout = None ) : <EOL> try : <EOL> return self . _recv_queue . get ( timeout = timeout ) <EOL> except gevent . queue . Empty : <EOL> raise TimeoutExpired ( timeout ) <EOL> class Event ( object ) : <EOL> __slots__ = [ '<STR_LIT>' , '<STR_LIT>' , '<STR_LIT>' , '<STR_LIT>' ] <EOL> def __init__ ( self , name , args , context , header = None ) : <EOL> self . _name = name <EOL> self . _args = args <EOL> if header is None : <EOL> self . _header = { '<STR_LIT>' : context . new_msgid ( ) , '<STR_LIT:v>' : <NUM_LIT:3> } <EOL> else : <EOL> self . _header = header <EOL> self . _identity = None <EOL> @ property <EOL> def header ( self ) : <EOL> return self . _header <EOL> @ property <EOL> def name ( self ) : <EOL> return self . _name <EOL> @ name . setter <EOL> def name ( self , v ) : <EOL> self . _name = v <EOL> @ property <EOL> def args ( self ) : <EOL> return self . _args <EOL> @ property <EOL> def identity ( self ) : <EOL> return self . _identity <EOL> @ identity . setter <EOL> def identity ( self , v ) : <EOL> self . _identity = v <EOL> def pack ( self ) : <EOL> return msgpack . Packer ( use_bin_type = True ) . pack ( ( self . _header , self . _name , self . _args ) ) <EOL> @ staticmethod <EOL> def unpack ( blob ) : <EOL> unpacker = msgpack . Unpacker ( encoding = '<STR_LIT:utf-8>' ) <EOL> unpacker . feed ( blob ) <EOL> unpacked_msg = unpacker . unpack ( ) <EOL> try : <EOL> ( header , name , args ) = unpacked_msg <EOL> except Exception as e : <EOL> raise Exception ( '<STR_LIT>' . format ( <EOL> unpacked_msg , e ) ) <EOL> if not isinstance ( header , dict ) : <EOL> header = { } <EOL> return Event ( name , args , None , header ) <EOL> def __str__ ( self , ignore_args = False ) : <EOL> if ignore_args : <EOL> args = '<STR_LIT>' <EOL> else : <EOL> args = self . _args <EOL> try : <EOL> args = '<STR_LIT>' . format ( str ( self . unpack ( self . _args ) ) ) <EOL> except Exception : <EOL> pass <EOL> if self . _identity : <EOL> identity = '<STR_LIT:U+002CU+0020>' . join ( repr ( x . bytes ) for x in self . _identity ) <EOL> return '<STR_LIT>' . format ( identity , self . _name , <EOL> self . _header , args ) <EOL> return '<STR_LIT>' . format ( self . _name , self . _header , args ) <EOL> class Events ( ChannelBase ) : <EOL> def __init__ ( self , zmq_socket_type , context = None ) : <EOL> self . _debug = False <EOL> self . _zmq_socket_type = zmq_socket_type <EOL> self . _context = context or Context . get_instance ( ) <EOL> self . _socket = self . _context . socket ( zmq_socket_type ) <EOL> if zmq_socket_type in ( zmq . PUSH , zmq . PUB , zmq . DEALER , zmq . ROUTER ) : <EOL> self . _send = Sender ( self . _socket ) <EOL> elif zmq_socket_type in ( zmq . REQ , zmq . REP ) : <EOL> self . _send = SequentialSender ( self . _socket ) <EOL> else : <EOL> self . _send = None <EOL> if zmq_socket_type in ( zmq . PULL , zmq . SUB , zmq . DEALER , zmq . ROUTER ) : <EOL> self . _recv = Receiver ( self . _socket ) <EOL>
+---------
+elif zmq_socket_type in ( zmq . REQ , zmq . REP ) :
+
+
+
+DATASET6 -> ScienceQA:
+
+Choose an answer for the following question and give your reasons. Your output should follow this format:
+Answer: 
+Because 
+Now let's begin!
+
+Question:
+Identify the question that Kathleen and Bryant's experiment can best answer.
+Context:
+The passage below describes an experiment. Read the passage and then follow the instructions below.
+
+Kathleen applied a thin layer of wax to the underside of her snowboard and rode the board straight down a hill. Then, she removed the wax and rode the snowboard straight down the hill again. She repeated the rides four more times, alternating whether she rode with a thin layer of wax on the board or not. Her friend Bryant timed each ride. Kathleen and Bryant calculated the average time it took to slide straight down the hill on the snowboard with wax compared to the average time on the snowboard without wax.
+Figure: snowboarding down a hill.
+Choices:
+A. Does Kathleen's snowboard slide down a hill in less time when it has a layer of wax or when it does not have a layer of wax?
+B. Does Kathleen's snowboard slide down a hill in less time when it has a thin layer of wax or a thick layer of wax?
+
+---------
+Answer: A
+Because Experiments can be designed to answer specific questions. How can you identify the questions that a certain experiment can answer? In order to do this, you need to figure out what was tested and what was measured during the experiment.
+Imagine an experiment with two groups of daffodil plants. One group of plants was grown in sandy soil, and the other was grown in clay soil. Then, the height of each plant was measured.
+First, identify the part of the experiment that was tested. The part of an experiment that is tested usually involves the part of the experimental setup that is different or changed. In the experiment described above, each group of plants was grown in a different type of soil. So, the effect of growing plants in different soil types was tested.
+Then, identify the part of the experiment that was measured. The part of the experiment that is measured may include measurements and calculations. In the experiment described above, the heights of the plants in each group were measured.
+Experiments can answer questions about how the part of the experiment that is tested affects the part that is measured. So, the experiment described above can answer questions about how soil type affects plant height.
+Examples of questions that this experiment can answer include:
+Does soil type affect the height of daffodil plants?
+Do daffodil plants in sandy soil grow taller than daffodil plants in clay soil?
+Are daffodil plants grown in sandy soil shorter than daffodil plants grown in clay soil?
+
+
+
+DATASET7 -> ToolBench:
+
+system: You are AutoGPT, you can use many tools(functions) to do the following task.
+First I will give you the task description, and your task start.
+At each step, you need to give your thought to analyze the status now and what to do next, with a function call to actually excute your step. Your output should follow this format:
+Thought:
+Action
+Action Input:
+
+After the call, you will get the call result, and you are now in a new state.
+Then you will analyze your status now, then decide what to do next...
+After many (Thought-call) pairs, you finally perform the task, then you can give your finial answer.
+Remember: 
+1.the state change is irreversible, you can't go back to one of the former state, if you want to restart the task, say "I give up and restart".
+2.All the thought is short, at most in 5 sentence.
+3.You can do more then one trys, so if your plan is to continusly try some conditions, you can do one of the conditions per try.
+Let's Begin!
+Task description: You should use functions to help handle the real time user querys. Remember:
+1.ALWAYS call "Finish" function at the end of the task. And the final answer should contain enough information to show to the user,If you can't handle the task, or you find that function calls always fail(the function is not valid now), use function Finish->give_up_and_restart.
+2.Do not use origin tool names, use only subfunctions' names.
+You have access of the following tools:
+1.weatherapi_com: WeatherAPI.com is a powerful fully managed free weather and geolocation API provider that provides extensive APIs that range from the weather forecast, historical weather, future weather, weather alerts, air quality data, IP lookup, and astronomy through to sports, time zone, and geolocation.
+2.web_search: Billions of webpages, images and news with a single API call.  Visit us at: usearch.com
+3.the_cocktail_db: Cocktail recipes with high-quality images stored on AWS S3 for fast accessibility. Easy to use!Category: Food
+4.free_nba: Unofficial NBA API for Historical NBA Data
+5.weather: Current weather data API, and Weather forecast API - Basic access to the Weatherbit.io Weather API.
+
+Specifically, you have access to the following APIs: [{'name': 'search_autocomplete_api_for_weatherapi_com', 'description': 'This is the subfunction for tool "weatherapi_com", you can use this tool.The description of this function is: "Search or Autocomplete API returns matching cities and towns."', 'parameters': {'type': 'object', 'properties': {'q': {'type': 'string', 'description': 'Query parameter based on which data is sent back. It could be following:\n\nLatitude and Longitude (Decimal degree) e.g: q=48.8567,2.3508\ncity name e.g.: q=Paris\nUS zip e.g.: q=10001\nUK postcode e.g: q=SW1\nCanada postal code e.g: q=G2J\nmetar:<metar code> e.g'}}, 'required': ['q'], 'optional': []}}, {'name': 'history_weather_api_for_weatherapi_com', 'description': 'This is the subfunction for tool "weatherapi_com", you can use this tool.The description of this function is: "History weather API method returns historical weather for a date on or after 1st Jan, 2010 (depending upon subscription level) as json."', 'parameters': {'type': 'object', 'properties': {'dt': {'type': 'string', 'description': "For history API 'dt' should be on or after 1st Jan, 2010 in yyyy-MM-dd format"}, 'q': {'type': 'string', 'description': 'Query parameter based on which data is sent back. It could be following:\n\nLatitude and Longitude (Decimal degree) e.g: q=48.8567,2.3508\ncity name e.g.: q=Paris\nUS zip e.g.: q=10001\nUK postcode e.g: q=SW1\nCanada postal code e.g: q=G2J\nmetar:<metar code> e.g', 'example_value': 'London'}, 'hour': {'type': 'integer', 'description': 'Restricting history output to a specific hour in a given day.'}, 'end_dt': {'type': 'string', 'description': "Restrict date output for History API method. Should be on or after 1st Jan, 2010. Make sure end_dt is equal to or greater than 'dt'. "}, 'lang': {'type': 'string', 'description': "Returns 'condition:text' field in API in the desired language", 'example_value': 'en'}}, 'required': ['dt', 'q'], 'optional': ['hour', 'end_dt', 'lang']}}, {'name': 'realtime_weather_api_for_weatherapi_com', 'description': 'This is the subfunction for tool "weatherapi_com", you can use this tool.The description of this function is: "Current weather or realtime weather API method allows a user to get up to date current weather information in json and xml. The data is returned as a Current Object."', 'parameters': {'type': 'object', 'properties': {'q': {'type': 'string', 'description': 'Query parameter based on which data is sent back. It could be following:  Latitude and Longitude (Decimal degree) e.g: q=48.8567,2.3508 city name e.g.: q=Paris US zip e.g.: q=10001 UK postcode e.g: q=SW1 Canada postal code e.g: q=G2J metar:<metar code> e.g', 'example_value': '53.1,-0.13'}}, 'required': ['q'], 'optional': []}}, {'name': 'autocomplete_for_web_search', 'description': 'This is the subfunction for tool "web_search", you can use this tool.The description of this function is: "Suggest as-you-type completion."', 'parameters': {'type': 'object', 'properties': {'text': {'type': 'string', 'description': 'The prefix to complete', 'example_value': 'do'}}, 'required': ['text'], 'optional': []}}, {'name': 'imagesearch_for_web_search', 'description': 'This is the subfunction for tool "web_search", you can use this tool.The description of this function is: "Get relevant images for a given query."', 'parameters': {'type': 'object', 'properties': {'q': {'type': 'string', 'description': "The user's search query string.", 'example_value': 'taylor swift'}, 'pagenumber': {'type': 'integer', 'description': 'The page to view.', 'example_value': '1'}, 'pagesize': {'type': 'integer', 'description': 'The number of items per page. The maximum value is 50.', 'example_value': '10'}, 'autocorrect': {'type': 'boolean', 'description': 'Automatically correct spelling.', 'example_value': True}, 'safesearch': {'type': 'boolean', 'description': 'A filter used to filter results for adult content.', 'example_value': False}}, 'required': ['q', 'pagenumber', 'pagesize', 'autocorrect'], 'optional': ['safesearch']}}, {'name': 'websearch_for_web_search', 'description': 'This is the subfunction for tool "web_search", you can use this tool.The description of this function is: "Get relevant web pages for a given query."', 'parameters': {'type': 'object', 'properties': {'q': {'type': 'string', 'description': "The user's search query string.", 'example_value': 'taylor swift'}, 'autocorrect': {'type': 'boolean', 'description': 'Automatically correct spelling.', 'example_value': True}, 'pagenumber': {'type': 'integer', 'description': 'The page to view.', 'example_value': '1'}, 'pagesize': {'type': 'integer', 'description': 'The number of items per page. The maximum value is 50.', 'example_value': '10'}, 'safesearch': {'type': 'boolean', 'description': 'A filter used to filter results for adult content.', 'example_value': False}}, 'required': ['q', 'autocorrect', 'pagenumber', 'pagesize'], 'optional': ['safesearch']}}, {'name': 'list_of_cocktails_for_the_cocktail_db', 'description': 'This is the subfunction for tool "the_cocktail_db", you can use this tool.The description of this function is: "This endpoint responds with a list of cocktails that includes their names and images, as well as their IDs, which must be provided in the "Detailed Cocktail Recipe by ID" endpoint to receive the detailed cocktail recipe."', 'parameters': {'type': 'object', 'properties': {}, 'required': [], 'optional': []}}, {'name': 'detailed_cocktail_recipe_by_id_for_the_cocktail_db', 'description': 'This is the subfunction for tool "the_cocktail_db", you can use this tool.The description of this function is: "Get Cocktail by ID"', 'parameters': {'type': 'object', 'properties': {'is_id': {'type': 'string', 'description': '', 'example_value': '45'}}, 'required': ['is_id'], 'optional': []}}, {'name': 'get_a_specific_game_for_free_nba', 'description': 'This is the subfunction for tool "free_nba", you can use this tool.The description of this function is: "This endpoint retrieves a specific game"', 'parameters': {'type': 'object', 'properties': {'is_id': {'type': 'string', 'description': 'ID of the game'}}, 'required': ['is_id'], 'optional': []}}, {'name': 'get_all_players_for_free_nba', 'description': 'This is the subfunction for tool "free_nba", you can use this tool.The description of this function is: "This endpoint retrieves all players from all seasons."', 'parameters': {'type': 'object', 'properties': {}, 'required': [], 'optional': []}}, {'name': 'get_a_specific_team_for_free_nba', 'description': 'This is the subfunction for tool "free_nba", you can use this tool.The description of this function is: "This endpoint retrieves a specific team"', 'parameters': {'type': 'object', 'properties': {'is_id': {'type': 'string', 'description': 'The ID of the team'}}, 'required': ['is_id'], 'optional': []}}, {'name': '120_hour_forecast_for_weather', 'description': 'This is the subfunction for tool "weather", you can use this tool.The description of this function is: "Returns a forecast for up to 120 hours in the future (default 48 hours)"', 'parameters': {'type': 'object', 'properties': {'lat': {'type': 'integer', 'description': 'Latitude', 'example_value': '38.5'}, 'lon': {'type': 'integer', 'description': 'Longitude', 'example_value': '-78.5'}, 'lang': {'type': 'string', 'description': 'Language for weather description'}, 'hours': {'type': 'string', 'description': 'Limit number of forecast hours', 'example_value': '48'}, 'units': {'type': 'string', 'description': 'I = Imperial, S = Scientific, M = Metric (Default)'}}, 'required': ['lat', 'lon'], 'optional': ['lang', 'hours', 'units']}}, {'name': 'current_weather_data_of_a_location_for_weather', 'description': 'This is the subfunction for tool "weather", you can use this tool.The description of this function is: "Returns the current (most recent) weather observation of a given location"', 'parameters': {'type': 'object', 'properties': {'lat': {'type': 'integer', 'description': 'Latitude', 'example_value': '-78.5'}, 'lon': {'type': 'integer', 'description': 'Longitude', 'example_value': '38.5'}, 'lang': {'type': 'string', 'description': 'Language'}, 'units': {'type': 'string', 'description': 'I = Imperial, S = Scientific, M = Metric (Default)'}}, 'required': ['lat', 'lon'], 'optional': ['lang', 'units']}}, {'name': '16_day_forecast_for_weather', 'description': 'This is the subfunction for tool "weather", you can use this tool.The description of this function is: "Returns a 16 day (daily) forecast"', 'parameters': {'type': 'object', 'properties': {'lon': {'type': 'integer', 'description': 'Longitude', 'example_value': '-78.5'}, 'lat': {'type': 'integer', 'description': 'Latitude', 'example_value': '38.5'}, 'lang': {'type': 'string', 'description': 'Language for weather description'}, 'units': {'type': 'string', 'description': 'metric (Default), imperial'}}, 'required': ['lon', 'lat'], 'optional': ['lang', 'units']}}, {'name': 'Finish', 'description': 'If you believe that you have obtained a result that can answer the task, please call this function to provide the final answer. Alternatively, if you recognize that you are unable to proceed with the task in the current state, call this function to restart. Remember: you must ALWAYS call this function at the end of your attempt, and the only part that will be shown to the user is the final answer, so it should contain sufficient information.', 'parameters': {'type': 'object', 'properties': {'return_type': {'type': 'string', 'enum': ['give_answer', 'give_up_and_restart']}, 'final_answer': {'type': 'string', 'description': 'The final answer you want to give the user. You should have this field if "return_type"=="give_answer"'}}, 'required': ['return_type']}}]
+user: 
+I'm organizing a beach party for my friends and I need to know the weather conditions for tomorrow at Miami Beach. Can you provide me with the current weather details? Additionally, could you recommend some refreshing cocktail recipes for the party?
+Begin!
+
+assistant: 
+Thought: 
+Action: realtime_weather_api_for_weatherapi_com
+Action Input: {
+"q": "Miami Beach"
+}
+function: {"error": "", "response": "{'location': {'name': 'Miami Beach', 'region': 'Florida', 'country': 'United States of America', 'lat': 25.79, 'lon': -80.13, 'tz_id': 'America/New_York', 'localtime_epoch': 1689097707, 'localtime': '2023-07-11 13:48'}, 'current': {'last_updated_epoch': 1689097500, 'last_updated': '2023-07-11 13:45', 'temp_c': 35.0, 'temp_f': 95.0, 'is_day': 1, 'condition': {'text': 'Partly cloudy', 'icon': '//cdn.weatherapi.com/weather/64x64/day/116.png', 'code': 1003}, 'wind_mph': 10.5, 'wind_kph': 16.9, 'wind_degree': 100, 'wind_dir': 'E', 'pressure_mb': 1018.0, 'pressure_in': 30.06, 'precip_mm': 0.0, 'precip_in': 0.0, 'humidity': 54, 'cloud': 75, 'feelslike_c': 49.9, 'feelslike_f': 121.8, 'vis_km': 16.0, 'vis_miles': 9.0, 'uv': 8.0, 'gust_mph': 8.9, 'gust_kph': 14.4}}"}
+assistant: 
+--------
+Thought: 
+Action: list_of_cocktails_for_the_cocktail_db
+Action Input: {}
