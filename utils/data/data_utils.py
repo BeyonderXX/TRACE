@@ -304,7 +304,7 @@ def create_prompt_dataset(local_rank,
     # for debug
     # if local_rank <= 0 and (buf_create_cache.item() != 0 or reload):
     if local_rank <= 0:
-        train_dataset, eval_dataset = create_dataset(
+        train_dataset, eval_dataset, test_dataset = create_dataset(
             local_rank, data_path, output_path,
             seed, add_sys_prefix=add_sys_prefix, for_backbone=for_backbone)
 
