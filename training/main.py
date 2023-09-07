@@ -49,6 +49,8 @@ from params import Method2Class, AllDatasetName
 
 
 def parse_args():
+    def list_of_strings(arg):
+        return arg.split(',')
     parser = argparse.ArgumentParser(
         description=
         "Finetune a transformers model on a causal language modeling task")
@@ -57,7 +59,7 @@ def parse_args():
                         default='Dahoas/rm-static',
                         help='Path to the training dataset, a single data path.')
     parser.add_argument('--dataset_name',
-                        type=str,
+                        type=list_of_strings,
                         default='all',
                         help='Dataset to be used.')
     parser.add_argument(
@@ -245,10 +247,10 @@ def main():
     train_task_list = {}
     eval_task_list = {}
 
-    if args.dataset_name == "all":
+    if args.dataset_name[0] == "all":
         Datasets = AllDatasetName
     else:
-        Datasets = [args.dataset_name]
+        Datasets = args.dataset_name
     for dataset in Datasets:
         dataset_path = os.path.join(args.data_path,dataset)
         # Prepare the data
