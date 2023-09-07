@@ -69,14 +69,14 @@ eval.json 的内容，在训练时，按照 Q: + prompt + A: + answer 拼接方�
 模型的日志，参数保存，只在第一张卡 上进行。
 
 
-为了方便debug，设置了debug参数，使用opt小模型快速debug，这里给出 debug 参数。
+为了方便debug，设置了debug参数，使用opt小模型快速debug，这里给出 debug 参数。(不需要加 --debug 了)
 
 ```
-deepspeed --master_port 51419 main.py  --debug --data_path Anthropic/hh-rlhf --model_name_or_path facebook/opt-1.3b --per_device_train_batch_size 8 --per_device_eval_batch_size 16 --max_prompt_len 512 --max_ans_len 512 --learning_rate 1e-5 --weight_decay 0. --num_train_epochs 3 --gradient_accumulation_steps 8 --lr_scheduler_type cosine --num_warmup_steps 0 --seed 1234 --zero_stage 2 --deepspeed --print_loss --output_dir /mnt/petrelfs/wangxiao/debug_runs > debug.log 2>&1 &
+deepspeed --master_port 51419 main.py  --data_path Anthropic/hh-rlhf --model_name_or_path facebook/opt-1.3b --per_device_train_batch_size 8 --per_device_eval_batch_size 16 --max_prompt_len 512 --max_ans_len 512 --learning_rate 1e-5 --weight_decay 0. --num_train_epochs 3 --gradient_accumulation_steps 8 --lr_scheduler_type cosine --num_warmup_steps 0 --seed 1234 --zero_stage 2 --deepspeed --print_loss --output_dir /mnt/petrelfs/wangxiao/debug_runs > debug.log 2>&1 &
 ```
 
 
-训练参数，去除 '--debug' 参数，修改模型名。
+训练参数，修改模型名。
 
 ```
 deepspeed --master_port 51419 main.py  --data_path Anthropic/hh-rlhf  --model_name_or_path /mnt/petrelfs/wangxiao/MODELS/llama2HF/7B-Chat --per_device_train_batch_size 8 --per_device_eval_batch_size 16 --max_prompt_len 512 --max_ans_len 512 --learning_rate 1e-5 --weight_decay 0. --num_train_epochs 3 --gradient_accumulation_steps 8 --lr_scheduler_type cosine --num_warmup_steps 0 --seed 1234 --zero_stage 2 --deepspeed --print_loss --output_dir /mnt/petrelfs/wangxiao/7B_3epochs_runs > 7b.log 2>&1 &
@@ -110,26 +110,31 @@ deepspeed --master_port 51419 main.py  --data_path Anthropic/hh-rlhf  --model_na
 
 ### 模型推理
 
-运行入口是 **inference/infer.py**，使用 deepspeed 的 model parallism 技术，会将模型均匀地切到不同卡上进行推理。
+运行入口是 **inference/infer_multi.py**，使用 deepspeed 的 model parallism 技术，会将模型均匀地切到不同卡上进行推理。
 
 模型的日志，预测结果保存，只在第一张卡上进行。
 
-同样支持debug模式
+同样支持debug模式(填个小模型名字就行)
 
 ```
-deepspeed --num_gpus 2 --master_port 51419 infer.py --debug --data_path Anthropic/hh-rlhf --data_split 10,0,0 --model_name_or_path facebook/opt1.3b  --max_prompt_len 512 --max_ans_len 512 --seed 1234 --deepspeed --inference_task --inference_output_path /mnt/petrelfs/wangxiao/SFT/debug_predictions.csv > inference_debug.log 2>&1 &
+deepspeed --num_gpus 2 --master_port 51419 infer_multi.py --data_path Anthropic/hh-rlhf --model_name_or_path facebook/opt1.3b  --max_prompt_len 512 --max_ans_len 512 --seed 1234 --deepspeed --inference_task --inference_output_path /mnt/petrelfs/wangxiao/SFT/debug_predictions.csv > inference_debug.log 2>&1 &
 ```
 
 
 正常推理指令，以llama为例
 
 ```
-deepspeed --num_gpus 8 --master_port 51419 predict_sft.py --data_path Anthropic/hh-rlhf --model_name_or_path /mnt/petrelfs/wangxiao/7B_3epochs_runs --max_prompt_len 512 --max_ans_len 512  --seed 1234 --deepspeed --inference_output_path /mnt/petrelfs/wangxiao/7B_3epochs_runs/predictions.csv > inference7b.log 2>&1 &
+deepspeed --num_gpus 8 --master_port 51419 infer_multi.py --data_path Anthropic/hh-rlhf --model_name_or_path /mnt/petrelfs/wangxiao/llama_7B_3epochs_runs --max_prompt_len 512 --max_ans_len 512  --seed 1234 --deepspeed --inference_output_path /mnt/petrelfs/wangxiao/7B_3epochs_runs/predictions.csv > inference7b.log 2>&1 &
 ```
 
 
-具体推理时的参数在 infer.py 内部改，比如默认的推理参数为：
+具体推理时的参数在 infer_multi.py/infer_single.py 内部改，比如默认的推理参数为：
 
 ```
 model.generate(batch['input_ids'], max_new_tokens=args.max_ans_len, pad_token_id=tokenizer.eos_token_id, attention_mask = batch['attention_mask'], temperature=0.7, do_sample=True, repetition_penalty=2.0 )
 ```
+
+单卡推理脚本为 infer_single.py 参数和多卡一样，只是从python启动而不是deepspeed启动。
+
+
+**如果要修改推理逻辑，记得 infer_multi.py 和 infer_single.py 要一致！**

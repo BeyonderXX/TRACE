@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 class DataCollator:
     tokenizer: PreTrainedTokenizerBase
     model: Optional[Any] = None
-    padding: Union[bool, str, PaddingStrategy] = True       # ‘longest’
+    padding: Union[bool, str, PaddingStrategy] = True  # ‘longest’
     max_prompt_len: Optional[int] = None
     max_ans_len: Optional[int] = None
     pad_to_multiple_of: Optional[int] = 1
@@ -24,64 +24,91 @@ class DataCollator:
 
         return model_inputs
 
+    # only support left padding for now
+    def tokenize(self, sentence, cutoff_len, add_bos_token=True, add_eos_token=True):
+        # there's probably a way to do this with the tokenizer settings
+        # but again, gotta move fast
+        result = self.tokenizer(
+            sentence,
+            truncation=True,
+            max_length=cutoff_len,
+            add_special_tokens=False,
+            padding=False,
+            return_tensors=None,
+        )
+
+        if (
+                len(result["input_ids"]) < cutoff_len
+                and add_eos_token
+        ):
+            result["input_ids"].append(self.tokenizer.eos_token_id)
+            result["attention_mask"].append(1)
+
+        if (
+                len(result["input_ids"]) < cutoff_len
+                and add_bos_token
+        ):
+            result["input_ids"] = [self.tokenizer.bos_token_id] + result["input_ids"]
+            result["attention_mask"] = [1] + result["attention_mask"]
+
+        result["labels"] = result["input_ids"].copy()
+
+        return result
+
     # support decoder-only models for left padding
     def decoder_call(self, batch, return_tensors):
+        # to fix the bug
         sources = []
-        prompt_lens = []  # 用于存储每个prompt的长度
+        tokenized_sources = []
         label_lens = []  # 用于存储每个label的长度
         actual_max_len = 0  # 用于存储batch中的实际最大长度
+        limit_len = self.max_prompt_len + self.max_ans_len if not self.inference else self.max_prompt_len
 
         for instance in batch:
             instruction = instance['prompt']
             label = instance['answer']
+            sources.append(instruction)
 
-            # add bos and eos
-            task_input = self.tokenizer.bos_token + instruction
-            label = label + self.tokenizer.eos_token
-
-            tokenized_input = self.tokenizer(task_input, add_special_tokens=False,return_tensors=return_tensors)["input_ids"][0]
-            tokenized_label = self.tokenizer(label, add_special_tokens=False, return_tensors=return_tensors)["input_ids"][0]
-
-            # 保存prompt的长度
-            prompt_lens.append(len(tokenized_input))
-            label_lens.append(len(tokenized_label))
-
-            # 根据是否是inference来计算total_len
             if not self.inference:
-                total_len = len(tokenized_input) + len(tokenized_label)
-                sources.append(task_input + label)
+                tokenized_label = self.tokenize(label, limit_len, add_bos_token=False, add_eos_token=True)
+                tokenize_source = self.tokenize(instruction + label, limit_len, add_bos_token=True, add_eos_token=True)
+                label_lens.append(len(tokenized_label["input_ids"]))
+                tokenized_sources.append(tokenize_source)
             else:
-                total_len = len(tokenized_input)
-                sources.append(task_input)
+                tokenize_source = self.tokenize(instruction, limit_len, add_bos_token=True, add_eos_token=False)
+                tokenized_sources.append(tokenize_source)
 
-            if total_len > actual_max_len:
-                actual_max_len = total_len
+            if len(tokenize_source["input_ids"]) > actual_max_len:
+                actual_max_len = len(tokenize_source["input_ids"])
 
         # 取batch中的最大长度和limit_input_len中的最小值作为实际padding长度
         # 并确保长度是pad_to_multiple_of的倍数
-        limit_input_len = self.max_prompt_len if self.inference else self.max_prompt_len + self.max_ans_len
-        actual_pad_len = min(actual_max_len, limit_input_len)
-        remainder = actual_pad_len % self.pad_to_multiple_of
-        if remainder > 0:
-            actual_pad_len += self.pad_to_multiple_of - remainder
-
-        model_inputs = self.tokenizer(
-            sources,
-            max_length=actual_pad_len,
-            padding=self.padding,
-            pad_to_multiple_of=self.pad_to_multiple_of,
-            return_tensors=return_tensors,
-            truncation=True
-        )
+        actual_pad_len = (
+                    (actual_max_len + self.pad_to_multiple_of - 1) // self.pad_to_multiple_of * self.pad_to_multiple_of)
 
         # 对于left padding和prompt部分的mask
+        for idx in range(len(tokenized_sources)):
+            pad_len = actual_pad_len - len(tokenized_sources[idx]["input_ids"])
+            assert sum(tokenized_sources[idx]["attention_mask"]) == len(tokenized_sources[idx]["input_ids"])
+            tokenized_sources[idx]["input_ids"] = [self.tokenizer.pad_token_id] * pad_len + tokenized_sources[idx][
+                "input_ids"]
+
+            tokenized_sources[idx]["attention_mask"] = [0] * pad_len + tokenized_sources[idx]["attention_mask"]
+
+            if not self.inference:
+                label_len = label_lens[idx]
+                label_mask_len = actual_pad_len - label_len
+                tokenized_sources[idx]["labels"] = [-100] * label_mask_len + tokenized_sources[idx]["labels"][
+                                                                             -label_len:]
+                assert len(tokenized_sources[idx]["input_ids"]) == len(tokenized_sources[idx]["attention_mask"]) == len(
+                    tokenized_sources[idx]["labels"]) == actual_pad_len
+
+        model_inputs = {'input_ids': torch.tensor([source["input_ids"] for source in tokenized_sources]),
+                        'attention_mask': torch.tensor([source["attention_mask"] for source in tokenized_sources])}
+
         if not self.inference:
-            labels_tensor = model_inputs["input_ids"].clone()
-            for idx, (prompt_len, label_length) in enumerate(zip(prompt_lens, label_lens)):
-                padding_len = actual_pad_len - (prompt_len + label_length)
-                labels_tensor[idx, :padding_len + prompt_len] = self.label_pad_token_id
-            model_inputs['labels'] = labels_tensor
+            model_inputs['labels'] = torch.tensor([source["labels"] for source in tokenized_sources])
+
         model_inputs['sources'] = sources
 
         return model_inputs
-

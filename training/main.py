@@ -181,9 +181,6 @@ def parse_args():
                         action='store_true',
                         help='Prints loss at each step.')
     # added by wangxiao
-    parser.add_argument('--debug',
-                        action='store_true',
-                        help='debug mode, which will use a small model and small dataset')
     parser.add_argument('--CL_method',
                 default=None,
                 help='continual learning method used')
@@ -225,24 +222,17 @@ def main():
     # Barrier to make sure all process are ready to train
     torch.distributed.barrier()
 
-    if args.debug:
-        tokenizer = load_hf_tokenizer(args.model_name_or_path, fast_tokenizer=True)
-        tokenizer.pad_token = tokenizer.eos_token
-    else:
-        tokenizer = LlamaTokenizer.from_pretrained(args.model_name_or_path,
-                                                   fast_tokenizer=True)
-        # todo, check for llama2
-        tokenizer.pad_token = tokenizer.eos_token
-
+    tokenizer = load_hf_tokenizer(args.model_name_or_path, fast_tokenizer=True)
     # default the LLM is decoder only model, so padding side is left
-    tokenizer.padding_side = 'left'
+    assert tokenizer.padding_side == 'left'
+    assert tokenizer.truncation_side == "left"
 
     model = create_hf_model(AutoModelForCausalLM,
                             args.model_name_or_path,
                             tokenizer,
                             ds_config=ds_config,
-                            disable_dropout=args.disable_dropout,
-                            debug=args.debug)
+                            disable_dropout=args.disable_dropout
+                            )
 
     train_task_list = {}
     eval_task_list = {}

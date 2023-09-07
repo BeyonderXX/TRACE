@@ -8,7 +8,7 @@
     "Hey, are you conscious? Can you talk to me?\nI'm not conscious, but I can talk to you."
 """
 
-#!/usr/bin/env python
+# !/usr/bin/env python
 # Copyright (c) Microsoft Corporation.
 # SPDX-License-Identifier: Apache-2.0
 
@@ -41,16 +41,14 @@ sys.path.append(
     os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir)))
 from utils.data.data_collator import DataCollator
 from utils.data.data_utils import create_prompt_dataset
-from utils.utils import print_rank_0, to_device, save_hf_format, set_random_seed, get_all_reduce_mean, get_optimizer_grouped_parameters, save_zero_three_model, load_hf_tokenizer
+from utils.utils import print_rank_0, to_device, save_hf_format, set_random_seed, get_all_reduce_mean, \
+    get_optimizer_grouped_parameters, save_zero_three_model, load_hf_tokenizer
 from utils.ds_utils import get_train_ds_config
 from utils.model.model_utils import create_hf_model
-
 from evaluations import eval_ScienceQA, eval_MeetingBank, eval_PapyrusF, eval_CStance, eval_Py150, eval_FOMC, eval_NumGLUE_cm, eval_NumGLUE_ds # to be continued
 
 
-
 # dist.init_process_group(backend='nccl')
-
 
 
 def parse_args():
@@ -75,7 +73,7 @@ def parse_args():
         "Path to pretrained model or model identifier from huggingface.co/models.",
         required=True,
     )
-    
+
     parser.add_argument(
         "--max_prompt_len",
         type=int,
@@ -88,6 +86,12 @@ def parse_args():
         type=int,
         default=256,
         help="The maximum answer length.",
+    )
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=0.1,
+        help="Generate temperature params.",
     )
     parser.add_argument(
         "--inference_batch",
@@ -103,7 +107,6 @@ def parse_args():
         help="Which task to be infered"
     )
 
-
     parser.add_argument("--output_dir",
                         type=str,
                         default=None,
@@ -112,23 +115,20 @@ def parse_args():
                         type=int,
                         default=42,
                         help="A seed for reproducible training.")
-    
+
     # local_rank 一般表示当前进程在当前节点的编号，global_rank 表示当前进程在所有进程中的编号
     # local_rank 为 -1 时，表示不使用分布式训练。这个值一般由 pytorch/deepspeed 自动设置，用户不用管
     parser.add_argument("--local_rank",
                         type=int,
                         default=-1,
                         help="local_rank for distributed training on gpus")
-  
+
     # added by wangxiao
-    parser.add_argument('--debug',
-                        action='store_true',
-                        help='debug mode, which will use a small model and small dataset')
     parser.add_argument('--inference_output_path',
                         type=str,
                         default=None,
                         help="Where to store inference results.")
-    
+
     parser = deepspeed.add_config_arguments(parser)
     args = parser.parse_args()
 
@@ -152,23 +152,16 @@ def main():
 
     args.global_rank = torch.distributed.get_rank()
 
-
     # If passed along, set the training seed now.
     set_random_seed(args.seed)
     # Barrier to make sure all process are ready to train
     # torch.distributed.barrier()
 
-    if args.debug:
-        tokenizer = load_hf_tokenizer(args.model_name_or_path, fast_tokenizer=True)
-        if "falcon" in args.model_name_or_path.lower():
-            tokenizer.bos_token = tokenizer.eos_token
-    else:
-        tokenizer = LlamaTokenizer.from_pretrained(args.model_name_or_path,
-                                                   fast_tokenizer=True)
-    tokenizer.pad_token = tokenizer.eos_token
+    tokenizer = load_hf_tokenizer(args.model_name_or_path, fast_tokenizer=True)
 
     # default the LLM is decoder only model, so padding side is left
-    tokenizer.padding_side = 'left'
+    assert tokenizer.padding_side == 'left'
+    assert tokenizer.truncation_side == "left"
 
     # set evaluation batch size
     # only support bs = 1, cause right padding training logic
@@ -177,7 +170,8 @@ def main():
                             args.model_name_or_path,
                             tokenizer,
                             ds_config=None,
-                            debug=args.debug)
+                            )
+    # model = model.bfloat16()
 
     # reference
     # https://github.com/microsoft/DeepSpeed/blob/master/docs/_tutorials/inference-tutorial.md
@@ -186,20 +180,29 @@ def main():
     # https://discuss.huggingface.co/t/using-text-generation-pipeline-for-llama-2-7b-chat-hf-setting-high-t-doesnt-change-output/48982
     # https://www.microsoft.com/en-us/research/blog/deepspeed-accelerating-large-scale-model-inference-and-training-via-system-optimizations-and-compression/
     # https://www.deepspeed.ai/tutorials/inference-tutorial/
-    
+
     replace_with_kernel_inject = False if "falcon" in args.model_name_or_path.lower() else True
-    ds_engine = deepspeed.init_inference(model, mp_size=world_size, dtype=torch.half, checkpoint=None,          replace_with_kernel_inject=replace_with_kernel_inject)
+    ds_engine = deepspeed.init_inference(model, mp_size=world_size, dtype=torch.bfloat16, checkpoint=None,
+                                         replace_with_kernel_inject=replace_with_kernel_inject)
+
+    from transformers import GenerationConfig
+    generation_config = GenerationConfig(
+        temperature=args.temperature,
+        do_sample=True,
+        num_return_sequences=1
+    )
+
     model = ds_engine.module
-    
+
     # Prepare the data
-    _, _, infer_dataset = create_prompt_dataset(
+    _, infer_dataset = create_prompt_dataset(
         args.local_rank,
         args.data_path,
         args.data_output_path,
         args.seed
     )
 
-    inf_data_collator  = DataCollator(
+    inf_data_collator = DataCollator(
         tokenizer,
         model=model,
         padding="longest",
@@ -216,7 +219,7 @@ def main():
                                   batch_size=args.inference_batch)
 
     progress_bar = tqdm(total=len(infer_dataloader), leave=True, disable=(args.global_rank != 0))
-    
+
     """
     >>> prompt = "Hey, are you conscious? Can you talk to me?"
     >>> inputs = tokenizer(prompt, return_tensors="pt")
@@ -226,6 +229,7 @@ def main():
     >>> tokenizer.batch_decode(generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
     "Hey, are you conscious? Can you talk to me?\nI'm not conscious, but I can talk to you."
     """
+
     def prediction(model, infer_dataloader):
         predicted_sequences = []
         sources_sequences = []
@@ -248,24 +252,36 @@ def main():
 
             with torch.no_grad():
                 # TODO, add more inference params
-                generate_ids = model.generate(batch['input_ids'], max_new_tokens=args.max_ans_len, 
-                                              pad_token_id=tokenizer.eos_token_id, attention_mask = batch['attention_mask'], temperature=0.7, do_sample=True, repetition_penalty=2.0 )
+                # backbone config
+                # generate_ids = model.generate(batch['input_ids'], max_new_tokens=args.max_ans_len,
+                #                               pad_token_id=tokenizer.eos_token_id, attention_mask = batch['attention_mask'], temperature=0.7, do_sample=True, repetition_penalty=2.0 )
 
-            sequences = tokenizer.batch_decode(generate_ids[:, prompt_len:], skip_special_tokens=True, clean_up_tokenization_spaces=False)
+                # sft config
+                generate_ids = model.generate(batch['input_ids'],
+                                              attention_mask=batch['attention_mask'],
+                                              max_new_tokens=args.max_ans_len,
+                                              bos_token_id=tokenizer.bos_token_id,
+                                              eos_token_id=tokenizer.eos_token_id,
+                                              pad_token_id=tokenizer.unk_token_id,
+                                              generation_config=generation_config,
+                                              )
+
+            sequences = tokenizer.batch_decode(generate_ids[:, prompt_len:], skip_special_tokens=True,
+                                               clean_up_tokenization_spaces=False)
             predicted_sequences += sequences
-            
+
             # if step > 20:
             #     break
 
         return sources_sequences, predicted_sequences
 
-    
-    def save_inference_results(evaluation_result: dict, sources_sequences: list, predicted_sequences: list, ground_truths: list):
+    def save_inference_results(evaluation_result: dict, sources_sequences: list, predicted_sequences: list,
+                               ground_truths: list):
         # save as a json file
-        df = {"eval": evaluation_result, 'prompts': sources_sequences, 'results': predicted_sequences, 'labels': ground_truths}
+        df = {"eval": evaluation_result, 'prompts': sources_sequences, 'results': predicted_sequences,
+              'labels': ground_truths}
         with open(args.inference_output_path, "w", encoding='utf-8') as file:
             json.dump(df, file, ensure_ascii=False)
-
 
     # Inference !
     print_rank_0("***** Start inference *****", args.global_rank)
@@ -288,7 +304,7 @@ def main():
     elif args.inference_task == "Papyrus-f":
         evaluation_result = eval_PapyrusF.eval(predicted_sequences, ground_truths)
     elif args.inference_task == "Py150":
-        evaluation_result = eval_Py150.eval(predicted_sequences, ground_truths
+        evaluation_result = eval_Py150.eval(predicted_sequences, ground_truths)
     elif args.inference_task == "FOMC":
         evaluation_result = eval_FOMC.eval(predicted_sequences, ground_truths)
     elif args.inference_task == "NumGLUE-cm":
@@ -296,12 +312,11 @@ def main():
     elif args.inference_task == "NumGLUE-ds":
         evaluation_result = eval_NumGLUE_ds.eval(predicted_sequences, ground_truths)
     else:
-        evaluation_result = {}                                        
-    
+        evaluation_result = {}
+
     if args.global_rank <= 0:
         print("***** Saving inference results *****")
         save_inference_results(evaluation_result, sources_sequences, predicted_sequences, ground_truths)
-
 
 if __name__ == "__main__":
     main()
