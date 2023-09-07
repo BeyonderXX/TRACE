@@ -295,6 +295,7 @@ def create_prompt_dataset(local_rank,
     )  # hash the file name to avoid too long file name
     train_fname = f"{output_path}/traindata_{fname}.pt"
     eval_fname = f"{output_path}/evaldata_{fname}.pt"
+    test_fname = f"{output_path}/testdata_{fname}.pt"
 
     cache_found = os.path.isfile(train_fname) and os.path.isfile(eval_fname)
     # buf_create_cache = torch.ByteTensor([not cache_found]).cuda()
@@ -312,7 +313,8 @@ def create_prompt_dataset(local_rank,
         # 提前准备好，可以加速预处理，torch.load 速度也会比较快
         torch.save(train_dataset, train_fname)
         torch.save(eval_dataset, eval_fname)
+        torch.save(test_dataset, test_fname)
 
     if distributed:
         torch.distributed.barrier()
-    return torch.load(train_fname), torch.load(eval_fname)
+    return torch.load(train_fname), torch.load(eval_fname), torch.load(test_fname)
