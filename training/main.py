@@ -365,6 +365,7 @@ def main():
     if args.CL_method in Method2Class.keys():
         CL_Trainer = Method2Class[args.CL_method](model, tokenizer, optimizer, train_task_list, eval_task_list, args)
         CL_Trainer.train_continual()
+        CL_Trainer.save_model()
         
     else:
         total_steps = args.num_train_epochs * len(train_dataloader)
@@ -414,19 +415,19 @@ def main():
 
     # TODO, model benchmarking
     
-    if args.output_dir is not None:
-        print_rank_0('saving the final model ...', args.global_rank)
+    # if args.output_dir is not None:
+    #     print_rank_0('saving the final model ...', args.global_rank)
 
-        if args.global_rank == 0:
-            save_hf_format(model, tokenizer, args)
+    #     if args.global_rank == 0:
+    #         save_hf_format(model, tokenizer, args)
 
-        if args.zero_stage == 3:
-            # For zero stage 3, each gpu only has a part of the model, so we need a special save function
-            save_zero_three_model(model,
-                                  args.global_rank,
-                                  args.output_dir,
-                                  zero_stage=args.zero_stage)
-        print_rank_0(f'Sucessful saving the final model to {args.output_dir}', args.global_rank)
+    #     if args.zero_stage == 3:
+    #         # For zero stage 3, each gpu only has a part of the model, so we need a special save function
+    #         save_zero_three_model(model,
+    #                               args.global_rank,
+    #                               args.output_dir,
+    #                               zero_stage=args.zero_stage)
+    #     print_rank_0(f'Sucessful saving the final model to {args.output_dir}', args.global_rank)
 
 
 if __name__ == "__main__":
