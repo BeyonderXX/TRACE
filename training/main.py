@@ -38,7 +38,10 @@ from utils.utils import print_rank_0, to_device, save_hf_format, set_random_seed
 from utils.ds_utils import get_train_ds_config
 from utils.module.lora import convert_linear_layer_to_lora, convert_lora_to_linear_layer, only_optimize_lora_parameters
 from utils.model.model_utils import create_hf_model
+# my_peft中修改了lora相关的逻辑
+from utils.my_peft import get_peft_model, PromptTuningInit, PromptTuningConfig, LoraConfig, TaskType
 
+from model.Replay.LFPT5 import getInitialPrompt
 from model.Dynamic_network.PP import PP, convert_model
 
 
@@ -233,7 +236,30 @@ def main():
                             ds_config=ds_config,
                             disable_dropout=args.disable_dropout
                             )
+    
+    # some CL methods can be realized by peft
+    if args.CL_method == "LFPT5":
+        initial_prompt = getInitialPrompt(tokenizer, prompt_token_number=300, task_name=args.dataset_name[0])
+        peft_config = PromptTuningConfig(
+            task_type=TaskType.CAUSAL_LM,
+            prompt_tuning_init=PromptTuningInit.TEXT,
+            num_virtual_tokens=300,
+            prompt_tuning_init_text=initial_prompt,
+            tokenizer_name_or_path=args.model_name_or_path,
+        )
+        model = get_peft_model(model, peft_config)
 
+    if args.CL_method == "O-LoRA":
+        peft_config = LoraConfig(
+            task_type=TaskType.CAUSAL_LM, r=8, lora_alpha=32, lora_dropout=0.1
+        )
+        model = get_peft_model(model, peft_config)
+        for name, param in model.named_parameters():
+            if name.find("loranew_") != -1:
+                param.requires_grad = True
+            elif name.find("lora_") != -1:
+                param.requires_grad = False
+    
     train_task_list = {}
     eval_task_list = {}
 
