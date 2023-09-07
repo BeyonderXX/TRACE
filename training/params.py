@@ -11,5 +11,5 @@ Method2Class = {"PP":PP,
                 "OGD":OGD,
                 "LwF":LwF}
 
-AllDatasetName = ["C-STANCE","FOMC","MeetingBank","Papyrus-f","Py150","ScienceQA","ToolBench"]
+AllDatasetName = ["C-STANCE","FOMC","MeetingBank","Papyrus-f","Py150","ScienceQA","ToolBench","NumGLUE-cm","NumGLUE-ds"]
 

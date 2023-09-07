@@ -248,11 +248,11 @@ def main():
     if args.dataset_name == "all":
         Datasets = AllDatasetName
     else:
-        Datasets = args.dataset_name
+        Datasets = [args.dataset_name]
     for dataset in Datasets:
         dataset_path = os.path.join(args.data_path,dataset)
         # Prepare the data
-        train_dataset, eval_dataset = create_prompt_dataset(
+        train_dataset, eval_dataset, _ = create_prompt_dataset(
             args.local_rank,
             dataset_path,
             args.data_output_path,
