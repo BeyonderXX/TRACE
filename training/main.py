@@ -394,9 +394,9 @@ def main():
         CL_Trainer.save_model()
         
     else:
+        #### Train ####
         total_steps = args.num_train_epochs * len(train_dataloader)
         progress_bar = tqdm(total=total_steps, leave=True, disable=(args.global_rank != 0))
-
 
         for epoch in range(args.num_train_epochs):
             print_rank_0(
@@ -439,21 +439,18 @@ def main():
             print_rank_0(f"ppl: {perplexity}", args.global_rank)
             model.tput_timer.update_epoch_count()
 
-    # TODO, model benchmarking
-    
-    # if args.output_dir is not None:
-    #     print_rank_0('saving the final model ...', args.global_rank)
-
-    #     if args.global_rank == 0:
-    #         save_hf_format(model, tokenizer, args)
-
-    #     if args.zero_stage == 3:
-    #         # For zero stage 3, each gpu only has a part of the model, so we need a special save function
-    #         save_zero_three_model(model,
-    #                               args.global_rank,
-    #                               args.output_dir,
-    #                               zero_stage=args.zero_stage)
-    #     print_rank_0(f'Sucessful saving the final model to {args.output_dir}', args.global_rank)
+        #### Save ####
+        if args.output_dir is not None:
+            print_rank_0('saving the final model ...', args.global_rank)
+            if args.global_rank == 0:
+                save_hf_format(model, tokenizer, args)
+            if args.zero_stage == 3:
+                # For zero stage 3, each gpu only has a part of the model, so we need a special save function
+                save_zero_three_model(model,
+                                      args.global_rank,
+                                      args.output_dir,
+                                      zero_stage=args.zero_stage)
+            print_rank_0(f'Sucessful saving the final model to {args.output_dir}', args.global_rank)
 
 
 if __name__ == "__main__":
