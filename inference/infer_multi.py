@@ -195,7 +195,7 @@ def main():
     model = ds_engine.module
 
     # Prepare the data
-    _, infer_dataset = create_prompt_dataset(
+    _, _, infer_dataset = create_prompt_dataset(
         args.local_rank,
         args.data_path,
         args.data_output_path,

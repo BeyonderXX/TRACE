@@ -158,7 +158,7 @@ def main():
     model.to(device)
 
     # Prepare the data
-    _, infer_dataset = create_prompt_dataset(
+    _, _, infer_dataset = create_prompt_dataset(
         args.local_rank,
         args.data_path,
         args.data_output_path,
@@ -249,7 +249,7 @@ def main():
             json.dump(df, file, ensure_ascii=False)
 
     # Inference !
-    print_rank_0("***** Start inference *****", args.global_rank)
+    print_rank_0("***** Start inference *****", args.local_rank)
     sources_sequences, predicted_sequences = prediction(model, infer_dataloader)
 
     with open(args.data_path + "/test.json", "r", encoding="utf-8") as file:
@@ -279,9 +279,9 @@ def main():
     else:
         evaluation_result = {}
 
-    if args.global_rank <= 0:
-        print("***** Saving inference results *****")
-        save_inference_results(evaluation_result, sources_sequences, predicted_sequences, ground_truths)
+    # if args.global_rank <= 0:  # only one process is running
+    print("***** Saving inference results *****")
+    save_inference_results(evaluation_result, sources_sequences, predicted_sequences, ground_truths)
 
 if __name__ == "__main__":
     main()
