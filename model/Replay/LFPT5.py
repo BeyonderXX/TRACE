@@ -121,7 +121,7 @@ class LFPT5(CL_Base_Model):
         return train_dataloader
 
 
-    def generate_pseudo_data(self, i_task, times_of_generation=500):
+    def generate_pseudo_data(self, task, i_task, times_of_generation=500):
         i = 0
         for task_name in self.train_task_list:
             if i == i_task:
@@ -154,6 +154,7 @@ class LFPT5(CL_Base_Model):
                 generated_texts = self.tokenizer.batch_decode(output, skip_special_tokens=True)
                 for generated_text in generated_texts:
                     if "__ans__" in generated_text:
+                        generated_text.replace("__" + task + "__", "")
                         pseudo_prompt.append(generated_text.split("__ans__")[0])
                         pseudo_answer.append(generated_text.split("__ans__")[1])
                         pseudo_prompt_lm.append("__" + task_name + "__")
@@ -190,7 +191,7 @@ class LFPT5(CL_Base_Model):
         num_task = len(self.train_task_list)
         eval_dataloader = self.eval_task_list[task]
         if i_task > 0:
-            pseudo_prompt, pseudo_answer, pseudo_prompt_lm, pseudo_answer_lm = self.generate_pseudo_data(i_task)
+            pseudo_prompt, pseudo_answer, pseudo_prompt_lm, pseudo_answer_lm = self.generate_pseudo_data(task, i_task)
             print_rank_0(f"adding pseudo data to the original dataset...", self.args.global_rank)
             train_dataloader = self.get_dataloader(task, pseudo_prompt, pseudo_answer, False)
             train_dataloader_lm = self.get_dataloader(task, pseudo_prompt_lm, pseudo_answer_lm, True)
