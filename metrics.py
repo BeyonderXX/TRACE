@@ -101,6 +101,8 @@ def f1_score(list1, list2):
                 break
     precision = num_TP / len(list1)
     recall = num_TP / len(list2)
+    if precision == 0 or recall == 0:
+        return 0
     return 2 * (precision * recall / (precision + recall))
 
 

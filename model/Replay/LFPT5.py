@@ -138,13 +138,18 @@ class LFPT5(CL_Base_Model):
             pseudo_answer = []
             pseudo_prompt_lm = []
             pseudo_answer_lm = []
-            for i in range(times_of_generation):
+            for time in range(times_of_generation):
+                print_rank_0(f"Generating pseudo data. " + str(times_of_generation - time) + " more times left.", self.args.local_rank)
                 output = self.model.generate(
                     input_ids=input_ids, 
                     attention_mask=attention_mask,
                     max_new_tokens=max_len,
+                    do_sample=True,
                     temperature=0.7,
-                    repetition_penalty=1.5
+                    repetition_penalty=1.5,
+                    top_k=50,
+                    top_p=0.95,
+                    num_return_sequences=5,
                     )
                 generated_texts = self.tokenizer.batch_decode(output, skip_special_tokens=True)
                 for generated_text in generated_texts:
