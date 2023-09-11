@@ -14,7 +14,7 @@ def postprocess(code):
 
 def eval(predicted_sequences, ground_truths):
     outputs = []
-    for output in original__outputs:
+    for output in predicted_sequences:
         outputs.append(postprocess(output))
     gts = []
     for gt in ground_truths:
