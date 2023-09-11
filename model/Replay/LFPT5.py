@@ -121,7 +121,7 @@ class LFPT5(CL_Base_Model):
         return train_dataloader
 
 
-    def generate_pseudo_data(self, i_task, times_of_generation=2000):
+    def generate_pseudo_data(self, i_task, times_of_generation=500):
         i = 0
         for task_name in self.train_task_list:
             if i == i_task:
