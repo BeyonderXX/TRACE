@@ -13,7 +13,7 @@ from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
 
 
-def getInitialPrompt(tokenizer, prompt_token_number, task_name):
+def getInitialPrompt(tokenizer, prompt_token_number):
     t5_tokenizer = AutoTokenizer.from_pretrained("t5-large") 
     fr = open('model/Replay/allnumber.pickle', 'rb') # t5词频表
     all_tokens = pickle.load(fr)
@@ -36,9 +36,8 @@ def getInitialPrompt(tokenizer, prompt_token_number, task_name):
             top5000.append(random_token)
 
     # 从top5000里随机挑选token直至prompt的最大长度
-    initial_prompt = task_name + " "
     tokens_to_use = random.sample(top5000, prompt_token_number)
-    initial_prompt += " ".join(tokens_to_use)
+    initial_prompt = " ".join(tokens_to_use)
     input_ids = tokenizer.encode(initial_prompt)[:prompt_token_number]
     initial_prompt = tokenizer.decode(input_ids)
 
@@ -122,7 +121,7 @@ class LFPT5(CL_Base_Model):
         return train_dataloader
 
 
-    def generate_pseudo_data(self, i_task, times_of_generation=1):
+    def generate_pseudo_data(self, i_task, times_of_generation=2000):
         i = 0
         for task_name in self.train_task_list:
             if i == i_task:

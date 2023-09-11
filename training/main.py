@@ -239,7 +239,7 @@ def main():
     
     # some CL methods can be realized by peft
     if args.CL_method == "LFPT5":
-        initial_prompt = getInitialPrompt(tokenizer, prompt_token_number=300, task_name=args.dataset_name[0])
+        initial_prompt = getInitialPrompt(tokenizer, prompt_token_number=300)
         peft_config = PromptTuningConfig(
             task_type=TaskType.CAUSAL_LM,
             prompt_tuning_init=PromptTuningInit.TEXT,
