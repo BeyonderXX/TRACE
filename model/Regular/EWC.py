@@ -8,6 +8,7 @@ from torch import nn
 from model.base_model import CL_Base_Model
 
 
+
 class EWC(CL_Base_Model):
     def __init__(self,model, tokenizer, optimizer, train_task_list, eval_task_list, args):
         super().__init__(model, tokenizer, optimizer, train_task_list, eval_task_list, args)
@@ -130,4 +131,7 @@ class EWC(CL_Base_Model):
             每一步之后更新？还是一个任务更新一次？
             '''
             self._update_previous_params()
+            
+            
+
 
