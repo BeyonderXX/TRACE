@@ -105,7 +105,7 @@ class MbPAplusplus(CL_Base_Model):
     Implements Memory based Parameter Adaptation model
     """
 
-    def __init__(self, model, tokenizer, optimizer, train_task_list, eval_task_list, test_task_list, args, L=30, K_neightbors=32, replay_size=64):
+    def __init__(self, model, tokenizer, optimizer, train_task_list, eval_task_list, test_task_list, args, L=30, K_neightbors=32, replay_size=0):
         super().__init__(model, tokenizer, optimizer, train_task_list, eval_task_list, test_task_list, args)
         self.REPLAY_FREQ = 0  #  多少step后replay
         self.L = L                      #  replay多少轮
@@ -117,7 +117,7 @@ class MbPAplusplus(CL_Base_Model):
 
 
     def get_keys(self,batch):
-        outputs = self.model(input_ids=batch['input_ids'], labels=batch['labels'], attention_mask=batch['attention_mask'], output_hidden_states=True)
+        outputs = self.model(input_ids=batch['input_ids'], attention_mask=batch['attention_mask'], output_hidden_states=True)
         keys = outputs.hidden_states[-1]  #最后一层的输出，hidden_states
         keys = keys[:, 0, :].squeeze(1) #取第一个token, (bs, hidden_size)
         
@@ -160,10 +160,10 @@ class MbPAplusplus(CL_Base_Model):
                         self.model.backward(loss)
                         self.model.step()
 
-                    del input_ids
-                    del attn_masks
-                    del labels
-                    del loss
+                    # del input_ids
+                    # del attn_masks
+                    # del labels
+                    # del loss
                 # Unpacking the batch items
                 batch = {k:batch[k].to('cuda') for k in batch}
                 
@@ -195,14 +195,14 @@ class MbPAplusplus(CL_Base_Model):
         for _ in range(self.L):
             for i in range(len(R_input_ids)):
                 
-                R_outputs = self.model(input_ids=R_input_ids[i], attention_mask=R_attn_masks[i], labels=R_labels[i])
+                R_outputs = self.model(input_ids=R_input_ids[i].unsqueeze(0), attention_mask=R_attn_masks[i].unsqueeze(0), labels=R_labels[i].unsqueeze(0))
                 R_loss = R_outputs.loss
                 # Initialize diff_loss to zero and place it on the appropriate device
                 diff_loss = torch.Tensor([0]).to(
                     "cuda" if torch.cuda.is_available() else "cpu")
                 # Iterate over base_weights and curr_weights and accumulate the euclidean norm
                 # of their differences
-                curr_weights = list(self.adaptive_model.parameters())
+                curr_weights = list(self.model.parameters())
                 for base_param, curr_param in zip(base_weights, curr_weights):
                     diff_loss += (curr_param-base_param).pow(2).sum()
 
