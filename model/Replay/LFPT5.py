@@ -57,10 +57,12 @@ class LFPT5(CL_Base_Model):
         # 增添2种特殊字符：
         # 1. "__ans__"                  伪数据prompt/answer的分隔符
         # 2. "__" + task name + "__"    生成伪数据任务的起始符
-        tasks_name = self.args.dataset_name
-        self.tokenizer.add_tokens("__ans__")
-        for task_name in tasks_name:
-            self.tokenizer.add_tokens("__" + task_name + "__")
+        
+        # # NOT ALLOWED for LLaMA tokenizer!!!
+        # tasks_name = self.args.dataset_name
+        # self.tokenizer.add_tokens("__ans__")
+        # for task_name in tasks_name:
+        #     self.tokenizer.add_tokens("__" + task_name + "__")
 
         if self.args.local_rank == -1:
             self.device = torch.device("cuda")
@@ -92,7 +94,7 @@ class LFPT5(CL_Base_Model):
             answer_dataset_lm = []
             for idx in range(len(prompt_dataset)):
                 prompt_dataset_lm.append("__" + task + "__")
-                answer_dataset_lm.append(prompt_dataset[idx] + "__ans__" + answer_dataset[idx])
+                answer_dataset_lm.append(prompt_dataset[idx] + "<unk>" + answer_dataset[idx])
             train_dataset.prompt_dataset = prompt_dataset_lm
             train_dataset.answer_dataset = answer_dataset_lm
         
@@ -153,10 +155,10 @@ class LFPT5(CL_Base_Model):
                     )
                 generated_texts = self.tokenizer.batch_decode(output, skip_special_tokens=True)
                 for generated_text in generated_texts:
-                    if "__ans__" in generated_text:
-                        generated_text.replace("__" + task_name + "__", "")
-                        pseudo_prompt.append(generated_text.split("__ans__")[0])
-                        pseudo_answer.append(generated_text.split("__ans__")[1])
+                    if "<unk>" in generated_text:
+                        generated_text = generated_text.replace("__" + task_name + "__", "")
+                        pseudo_prompt.append(generated_text.split("<unk>")[0])
+                        pseudo_answer.append(generated_text.split("<unk>")[1])
                         pseudo_prompt_lm.append("__" + task_name + "__")
                         pseudo_answer_lm.append(generated_text)
             print_rank_0(f"number of available pseudo prompts:" + str(len(pseudo_prompt)), self.args.local_rank)
