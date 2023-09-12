@@ -42,7 +42,7 @@ class CL_Base_Model:
             del batch['sources']
             batch = to_device(batch, device)
             with torch.no_grad():
-                outputs = self.model(**batch)
+                outputs = self.model(**batch, use_cache=False)
             loss = outputs.loss
             losses += loss.float()
         losses = losses / (step + 1)
@@ -156,6 +156,7 @@ class CL_Base_Model:
                                                   eos_token_id=self.tokenizer.eos_token_id,
                                                   pad_token_id=self.tokenizer.unk_token_id,
                                                   generation_config=generation_config,
+                                                  use_cache=False
                                                   )
 
                 sequences = self.tokenizer.batch_decode(generate_ids[:, prompt_len:], skip_special_tokens=True,
@@ -170,7 +171,10 @@ class CL_Base_Model:
             # save as a json file
             df = {"eval": evaluation_result, 'prompts': sources_sequences, 'results': predicted_sequences,
                   'labels': ground_truths}
-            with open(self.args.output_dir + "/results-" + str(round) + "-" + str(i_task) + "-" + task + ".json", "w", encoding='utf-8') as file:
+            if not os.path.exists(self.args.output_dir):
+                os.makedirs(self.args.output_dir)
+
+            with open(self.args.output_dir + "/results-" + str(round) + "-" + str(i_task) + "-" + task + ".json", "w+", encoding='utf-8') as file:
                 json.dump(df, file, ensure_ascii=False)
 
 
@@ -178,7 +182,7 @@ class CL_Base_Model:
         print_rank_0("***** Start inference *****", self.args.global_rank)
         sources_sequences, predicted_sequences = prediction(self.model, infer_dataloader)
 
-        with open(self.args.data_path + "/" + task + "/test.json", "r", encoding="utf-8") as file:
+        with open(self.args.data_path + "/" + task + "/test.json", "r+", encoding="utf-8") as file:
             testset = json.load(file)
         ground_truths = []
         for item in testset:

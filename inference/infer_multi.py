@@ -264,6 +264,7 @@ def main():
                                               eos_token_id=tokenizer.eos_token_id,
                                               pad_token_id=tokenizer.unk_token_id,
                                               generation_config=generation_config,
+                                              use_cache=False
                                               )
 
             sequences = tokenizer.batch_decode(generate_ids[:, prompt_len:], skip_special_tokens=True,

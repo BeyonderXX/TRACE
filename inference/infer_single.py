@@ -229,6 +229,7 @@ def main():
                                               temperature=args.temperature,
                                               do_sample=True,
                                               num_return_sequences=1,
+                                              use_cache=False
                                               )
 
             sequences = tokenizer.batch_decode(generate_ids[:, prompt_len:], skip_special_tokens=True,
