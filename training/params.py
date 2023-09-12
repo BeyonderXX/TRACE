@@ -1,5 +1,5 @@
 from model.Dynamic_network.PP import PP, convert_model
-from model.Regular.LwF import LwF
+from model.Regular.LWF import LwF
 from model.Regular.EWC import EWC
 from model.Regular.GEM import GEM
 from model.Regular.OGD import OGD
