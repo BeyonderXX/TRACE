@@ -34,3 +34,4 @@ fuzzywuzzy
 quadprog
 peft
 rouge
+flash_attn
