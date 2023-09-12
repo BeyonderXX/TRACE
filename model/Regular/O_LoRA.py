@@ -51,6 +51,9 @@ class O_LoRA(CL_Base_Model):
 
 
     def train_one_task(self, task, i_task, epochs):
+        if i_task > 0:
+            self.lamda_2 = 0.1
+
         num_task = len(self.train_task_list)
         train_dataloader = self.train_task_list[task]
         eval_dataloader = self.eval_task_list[task]
@@ -106,24 +109,63 @@ class O_LoRA(CL_Base_Model):
             print_rank_0(f"ppl: {perplexity}", self.args.global_rank)
             self.model.tput_timer.update_epoch_count()
 
+        def split_string_by_first_num(s):  
+            for i, c in enumerate(s):  
+                if c.isdigit():  
+                    return s[:i], s[i + 1:]  
+            return None, None  
+
         #### COMBINE lora with lora_new and INITIALIZE lora_new ####
+        flag = 0
+        layer_id = 0
+        ## Different models may have different naming of modules.
+        ## 'setattr' is not work. So We have to hard code the name temporarily.
+        # layer_list = self.model.base_model.model.model.decoder.layers   # opt
+        layer_list = self.model.base_model.model.model.layers           # llama
         state_dict = self.model.state_dict()    
         for k in state_dict:
-            if "lora_A" in k:
+            # # e.g. opt-1.3b
+            # self.model.base_model.model.model.decoder.layers[layer_id].\
+            # self_attn.v_proj.lora_A.default.weight.data\
+            # = state_dict[k]
+            if "v_proj.lora_A" in k:   
                 for k_ in state_dict:
-                    if "loranew_A" in k_ and k.split("lora_A")[0] == k_.split("loranew_A")[0]:
-                        state_dict[k] = torch.cat((state_dict[k], state_dict[k_]), dim=0) # [r_sum + r, r]
+                    if ("v_proj.loranew_A" in k_) and (k.split("v_proj.lora_A")[0] == k_.split("v_proj.loranew_A")[0]):
+                        state_dict[k] = torch.cat((state_dict[k], state_dict[k_]), dim=0) # [r_sum + r, dim]
+                        layer_list[layer_id].self_attn.v_proj.lora_A.default.weight.data = state_dict[k]
                         break # target modules have been matched
-            elif "lora_B" in k:
+                flag += 1
+            elif "q_proj.lora_A" in k:   
                 for k_ in state_dict:
-                    if "loranew_B" in k_ and k.split("lora_B")[0] == k_.split("loranew_B")[0]:
-                        state_dict[k] = torch.cat((state_dict[k], state_dict[k_]), dim=1) # [r, r_sum + r]
+                    if ("q_proj.loranew_A" in k_) and (k.split("q_proj.lora_A")[0] == k_.split("q_proj.loranew_A")[0]):
+                        state_dict[k] = torch.cat((state_dict[k], state_dict[k_]), dim=0) # [r_sum + r, dim]
+                        layer_list[layer_id].self_attn.q_proj.lora_A.default.weight.data = state_dict[k]
                         break # target modules have been matched
-            elif "loranew_A" in k:
+                flag += 1
+            elif "v_proj.lora_B" in k:
+                for k_ in state_dict:
+                    if ("v_proj.loranew_B" in k_) and (k.split("v_proj.lora_B")[0] == k_.split("v_proj.loranew_B")[0]):
+                        state_dict[k] = torch.cat((state_dict[k], state_dict[k_]), dim=1) # [dim, r_sum + r]
+                        layer_list[layer_id].self_attn.v_proj.lora_B.default.weight.data = state_dict[k]
+                        break # target modules have been matched
+                flag += 1
+            elif "q_proj.lora_B" in k:
+                for k_ in state_dict:
+                    if ("q_proj.loranew_B" in k_) and (k.split("q_proj.lora_B")[0] == k_.split("q_proj.loranew_B")[0]):
+                        state_dict[k] = torch.cat((state_dict[k], state_dict[k_]), dim=1) # [dim, r_sum + r]
+                        layer_list[layer_id].self_attn.q_proj.lora_B.default.weight.data = state_dict[k]
+                        break # target modules have been matched
+                flag += 1
+            if flag == 4:
+                layer_id += 1
+                flag = 0
+        for k in state_dict:
+            if "loranew_A" in k:
                 nn.init.kaiming_uniform_(state_dict[k], a=math.sqrt(5))
             elif "loranew_B" in k:
                 nn.init.zeros_(state_dict[k])
-        
+        self.model.load_state_dict(state_dict)
+
         #### RESET ####
         for name, param in self.model.named_parameters():
             if name.find("loranew_") != -1:
