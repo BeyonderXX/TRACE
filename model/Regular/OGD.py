@@ -33,20 +33,22 @@ def orthonormalize(vectors, normalize=True, start_idx=0):
 
 class OGD(CL_Base_Model):
     
-    def __init__(self, model, tokenizer, optimizer, train_task_list, eval_task_list, args,max_memories=50):
-        super().__init__(model, tokenizer, optimizer, train_task_list, eval_task_list, args)
-        n_params = count_parameter(self.model)
+    def __init__(self, model, tokenizer, optimizer, train_task_list, eval_task_list, test_task_list, args,max_memories=50):
+        super().__init__(model, tokenizer, optimizer, train_task_list, eval_task_list, test_task_list, args)
         # if args.debug: #debug
         #     self.ogd_basis = torch.ones(n_params, 10, dtype=torch.bfloat16).to('cuda')
         # else:
-        self.ogd_basis = torch.empty(n_params, 0).to('cuda')
         self.grad_dims = []
         for name, param in self.model.named_parameters():
-            self.grad_dims.append(param.data.numel())
+            if "lora" in name:
+                self.grad_dims.append(param.data.numel())
         self.cnt=len(self.grad_dims)
-        self.max_memories = max_memories
+        self.max_memories = max_memories  #max memory for one task
         
         self.cur_grads = torch.zeros(sum(self.grad_dims), dtype=torch.bfloat16).cuda()  #存储每个任务的梯度
+        n_params = sum(self.grad_dims)
+        self.ogd_basis = torch.empty(n_params, 0, dtype=torch.bfloat16).to('cuda')
+
     
     def project_vec(self,gradient):
         raw_shape = gradient.shape
@@ -55,10 +57,11 @@ class OGD(CL_Base_Model):
         # print("begin:{}, end:{}".format(beg, end))
         self.cnt-=1
         proj_basis = self.ogd_basis[beg:end,:]
-        gradient = gradient.view(-1)
+        
         
         if proj_basis.shape[1] > 0:  # param x basis_size
-
+            # print("Using gradient project:{}".format(gradient.shape))
+            gradient = gradient.view(-1)
             dots = torch.matmul(gradient, proj_basis)  # basis_size
             out = torch.matmul(proj_basis, dots.permute(*torch.arange(dots.ndim - 1, -1, -1)))
             # if beg==0:
@@ -73,18 +76,16 @@ class OGD(CL_Base_Model):
         # grads[:, tid].fill_(0.0)
         cnt = 0
         for name, param in self.model.named_parameters():
-            hp_grad = safe_get_full_grad(param)
-            if self.args.global_rank<=0:
-                if "embed" in name:
-                    print(hp_grad)
-                if hp_grad is not None:
-                    beg = 0 if cnt == 0 else sum(grad_dims[:cnt])
-                    en = sum(grad_dims[:cnt + 1])
-                    grads[beg: en].copy_(torch.nan_to_num(hp_grad.data.view(-1),nan=0))
-                cnt += 1
-                
-    def get_params_dict(self):
-        return self.model.parameters()
+            if "lora" in name:
+                hp_grad = safe_get_full_grad(param)
+                if self.args.global_rank<=0:
+                    if "embed" in name:
+                        print(hp_grad)
+                    if hp_grad is not None:
+                        beg = 0 if cnt == 0 else sum(grad_dims[:cnt])
+                        en = sum(grad_dims[:cnt + 1])
+                        grads[beg: en].copy_(torch.nan_to_num(hp_grad.data.view(-1),nan=0))
+                    cnt += 1
     
         
     def train_step(self,
@@ -106,10 +107,6 @@ class OGD(CL_Base_Model):
         # print('task = ', task)
 
         dataloader_train = self.train_task_list[task]
-        
-        if i_task!=0:
-            for name, params in self.model.named_parameters():
-                params.register_hook(lambda grads: self.project_vec(grads))
 
 
         for epoch in range(epochs):
@@ -132,16 +129,17 @@ class OGD(CL_Base_Model):
         
                 cnt=0
                 for name, params in self.model.named_parameters():
-                    hp_grad = safe_get_full_grad(params)
-                    beg = 0 if cnt == 0 else sum(self.grad_dims[:cnt])
-                    en = sum(self.grad_dims[:cnt + 1])
-                    self.cur_grads[beg: en].copy_(torch.nan_to_num(hp_grad.data.view(-1),nan=0))
-                    cnt += 1
+                    if "lora" in name:
+                        hp_grad = safe_get_full_grad(params)
+                        beg = 0 if cnt == 0 else sum(self.grad_dims[:cnt])
+                        en = sum(self.grad_dims[:cnt + 1])
+                        self.cur_grads[beg: en].copy_(torch.nan_to_num(hp_grad.data.view(-1),nan=0))
+                        cnt += 1
                         
                 # if self.args.global_rank<=0:
                 
                 #每个进程都添加一下，保证每个进程里的new_basis是一样的
-                if len(self.new_basis) <= self.max_memories:
+                if len(self.new_basis) < self.max_memories:
                     self.new_basis.append(self.cur_grads)
                         
                 
@@ -166,6 +164,13 @@ class OGD(CL_Base_Model):
             self.ogd_basis = orthonormalize(self.ogd_basis, normalize=True)
 
     
-
-
-            
+    def train_continual(self):
+        for name, params in self.model.named_parameters():
+            if "lora" in name:
+                params.register_hook(lambda grads: self.project_vec(grads))
+        for i_task, task in enumerate(self.train_task_list):
+            self.train_one_task(task, i_task, self.args.num_train_epochs)
+            for j_task, _task in enumerate(self.train_task_list):
+                if j_task > i_task:
+                    break
+                self.evaluate(i_task, j_task, _task)

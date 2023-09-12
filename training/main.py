@@ -39,10 +39,10 @@ from utils.ds_utils import get_train_ds_config
 from utils.module.lora import convert_linear_layer_to_lora, convert_lora_to_linear_layer, only_optimize_lora_parameters
 from utils.model.model_utils import create_hf_model
 # my_peft中修改了lora相关的逻辑
-from utils.my_peft import get_peft_model, PromptTuningInit, PromptTuningConfig, LoraConfig, TaskType
 
 from model.Replay.LFPT5 import getInitialPrompt
-from model.Dynamic_network.PP import PP, convert_model
+from model.Dynamic_network.PP import PP, convert_PP_model
+from model.Dynamic_network.L2P import convert_L2P_model
 
 
 from params import Method2Class, AllDatasetName
@@ -239,6 +239,8 @@ def main():
     
     # some CL methods can be realized by peft
     if args.CL_method == "LFPT5":
+        from utils.my_peft import get_peft_model, PromptTuningInit, PromptTuningConfig, LoraConfig, TaskType
+
         initial_prompt = getInitialPrompt(tokenizer, prompt_token_number=300)
         peft_config = PromptTuningConfig(
             task_type=TaskType.CAUSAL_LM,
@@ -250,6 +252,8 @@ def main():
         model = get_peft_model(model, peft_config)
 
     if args.CL_method == "O-LoRA":
+        from utils.my_peft import get_peft_model, PromptTuningInit, PromptTuningConfig, LoraConfig, TaskType
+
         peft_config = LoraConfig(
             task_type=TaskType.CAUSAL_LM, r=8, lora_alpha=32, lora_dropout=0.1
         )
@@ -259,9 +263,25 @@ def main():
                 param.requires_grad = True
             elif name.find("lora_") != -1:
                 param.requires_grad = False
+                
+    if args.CL_method == "OGD":
+        from peft import get_peft_model, LoraConfig, TaskType
+        
+        peft_config = LoraConfig(
+            task_type=TaskType.CAUSAL_LM, r=8, lora_alpha=32, lora_dropout=0.1
+        )
+        model = get_peft_model(model, peft_config)
+        for name, param in model.named_parameters():
+            if name.find("lora") != -1:
+                param.requires_grad = True
+
+        
+        
     
     train_task_list = {}
     eval_task_list = {}
+    test_task_list = {}
+
 
     if args.dataset_name[0] == "all":
         Datasets = AllDatasetName
@@ -270,7 +290,7 @@ def main():
     for dataset in Datasets:
         dataset_path = os.path.join(args.data_path,dataset)
         # Prepare the data
-        train_dataset, eval_dataset, _ = create_prompt_dataset(
+        train_dataset, eval_dataset, test_dataset = create_prompt_dataset(
             args.local_rank,
             dataset_path,
             args.data_output_path,
@@ -281,9 +301,13 @@ def main():
         if args.local_rank == -1:
             train_sampler = RandomSampler(train_dataset)
             eval_sampler = SequentialSampler(eval_dataset)
+            test_sampler = SequentialSampler(test_dataset)
+
         else:
             train_sampler = DistributedSampler(train_dataset)
             eval_sampler = DistributedSampler(eval_dataset)
+            test_sampler = DistributedSampler(test_dataset)
+
 
         data_collator  = DataCollator(
             tokenizer,
@@ -292,6 +316,15 @@ def main():
             max_ans_len=args.max_ans_len,
             pad_to_multiple_of=8,
             inference=False
+        )
+        inf_data_collator = DataCollator(
+            tokenizer,
+            model=model,
+            padding="longest",
+            max_prompt_len=args.max_prompt_len,
+            max_ans_len=args.max_ans_len,
+            pad_to_multiple_of=8,
+            inference=True
         )
                 
 
@@ -303,8 +336,13 @@ def main():
                                     collate_fn=data_collator,
                                     sampler=eval_sampler,
                                     batch_size=args.per_device_eval_batch_size)
+        test_dataloader = DataLoader(test_dataset,
+                            collate_fn=inf_data_collator,
+                            sampler=test_sampler,
+                            batch_size=args.per_device_eval_batch_size)
         train_task_list[dataset] = train_dataloader
         eval_task_list[dataset] = eval_dataloader
+        test_task_list[dataset] = test_dataloader
 
 
     def evaluation(model, eval_dataloader):
@@ -352,7 +390,7 @@ def main():
         
         return optimizer, lr_scheduler
     
-    if args.CL_method=="PP":
+    if args.CL_method=="PP" or args.CL_method=="L2P":
         if "opt" in args.model_name_or_path.lower():
             embed_tokens_shape = model.model.decoder.embed_tokens.weight.shape
             embed_tokens = model.model.decoder.embed_tokens
@@ -360,10 +398,18 @@ def main():
             args.embed_tokens_dim = embed_tokens_shape[1]
             args.embed_tokens_length = embed_tokens_shape[0]
             args.embed_tokens = embed_tokens
-        args.prefix_len = 20
-        args.task_length = len(train_task_list)
-        model = convert_model(model, args)
-    
+            
+        if args.CL_method=="PP":
+            args.prefix_len = 20
+            args.task_length = len(train_task_list)
+            model = convert_PP_model(model, args)
+            
+        elif args.CL_method=="L2P":
+            args.pool_size = 10
+            args.prompt_length = 5
+            args.prompt_init = "uniform"
+            model = convert_L2P_model(model, args)
+
         
     optimizer, lr_scheduler = get_optimizer(model)
 
@@ -389,7 +435,7 @@ def main():
     # Initialize the global progress bar
 
     if args.CL_method in Method2Class.keys():
-        CL_Trainer = Method2Class[args.CL_method](model, tokenizer, optimizer, train_task_list, eval_task_list, args)
+        CL_Trainer = Method2Class[args.CL_method](model, tokenizer, optimizer, train_task_list, eval_task_list, test_task_list, args)
         CL_Trainer.train_continual()
         CL_Trainer.save_model()
         

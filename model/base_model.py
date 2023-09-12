@@ -22,12 +22,14 @@ class CL_Base_Model:
                  optimizer,
                  train_task_list,
                  eval_task_list,
+                 test_task_list,
                  args):
         self.model = model
         self.tokenizer = tokenizer
         self.optimizer = optimizer
         self.train_task_list = train_task_list
         self.eval_task_list = eval_task_list
+        self.test_task_list = test_task_list
         self.args = args
         
         
@@ -52,29 +54,7 @@ class CL_Base_Model:
             torch.cuda.set_device(self.args.local_rank)
             device = torch.device("cuda", self.args.local_rank)
 
-        dataset_path = os.path.join(self.args.data_path,task)
-        _, _, infer_dataset = create_prompt_dataset(
-            self.args.local_rank,
-            dataset_path,
-            self.args.data_output_path,
-            self.args.seed
-        )
-
-        inf_data_collator = DataCollator(
-            self.tokenizer,
-            model=self.model,
-            padding="longest",
-            max_prompt_len=self.args.max_prompt_len,
-            max_ans_len=self.args.max_ans_len,
-            pad_to_multiple_of=8,
-            inference=True
-        )
-
-        infer_sampler = SequentialSampler(infer_dataset)
-        infer_dataloader = DataLoader(infer_dataset,
-                                      collate_fn=inf_data_collator,
-                                      sampler=infer_sampler,
-                                      batch_size=self.args.per_device_eval_batch_size)
+        infer_dataloader = self.test_task_list[task]
 
         progress_bar = tqdm(total=len(infer_dataloader), leave=True, disable=(self.args.global_rank != 0))
 
@@ -158,8 +138,8 @@ class CL_Base_Model:
             evaluation_result = eval_NumGLUE_cm.eval(predicted_sequences, ground_truths)
         elif task == "NumGLUE-ds":
             evaluation_result = eval_NumGLUE_ds.eval(predicted_sequences, ground_truths)
-        elif task == "ToolBench":
-            evaluation_result = eval_ToolBench.eval(predicted_sequences, ground_truths)
+        # elif task == "ToolBench":
+        #     evaluation_result = eval_ToolBench.eval(predicted_sequences, ground_truths)
         else:
             evaluation_result = {}
 

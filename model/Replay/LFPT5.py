@@ -46,10 +46,10 @@ def getInitialPrompt(tokenizer, prompt_token_number):
 
 class LFPT5(CL_Base_Model):
     def __init__(self,
-                 model, tokenizer, optimizer, train_task_list, eval_task_list, args,
+                 model, tokenizer, optimizer, train_task_list, eval_task_list, test_task_list, args,
                  lambda_lm = 0.1
                  ):
-        super().__init__(model, tokenizer, optimizer, train_task_list, eval_task_list, args)
+        super().__init__(model, tokenizer, optimizer, train_task_list, eval_task_list, test_task_list, args)
         '''
         1. prompt tuning
         2. pseudo data generation

@@ -7,7 +7,6 @@ import copy
 import random
 from model.base_model import CL_Base_Model
 from tqdm import tqdm
-# import pdb
 
 class ReplayMemory(object):
     """
@@ -56,38 +55,39 @@ class ReplayMemory(object):
             attn_masks.append(attn_mask)
             labels.append(label)
 
-        return (torch.LongTensor(input_ids), torch.LongTensor(attn_masks), torch.LongTensor(labels))
+        return (input_ids, attn_masks, labels)
 
     def get_neighbours(self, eval_keys, k=32):
         """
         Returns samples from buffer using nearest neighbour approach
         """
         samples = []
-        self.all_keys = list(self.memory.memory.keys()) #[len(keys),hidden_size]
-        self.all_keys = torch.stack(self.all_keys,dim=0)  # [len(keys),hidden_size]
+        self.all_keys = list(self.memory.keys()) #[len(keys),hidden_size]
+        self.all_keys = torch.stack(self.all_keys,dim=0).to("cuda")  # [len(keys),hidden_size]
 
         # Iterate over all the input keys
         # to find neigbours for each of them
         for eval_key in eval_keys:  #[hidden_size]
-            similarity = torch.mm(eval_key.unsqueeze(0),self.all_keys.permute(*torch.arange(self.all_keys.ndim - 1, -1, -1))) #[len(keys), eval_batch_size]
+            similarity = torch.mm(eval_key.unsqueeze(0),self.all_keys.permute(*torch.arange(self.all_keys.ndim - 1, -1, -1))) #[1,len(keys)]
             # print(similarity)
             values, indices = similarity.topk(k,dim=1)
-            neighbors_keys = self.all_keys[indices].squeeze(0)
+            # neighbors_keys = self.all_keys[indices].squeeze(0)
             # converts experiences into batch
-            neighbors  = [self.memory[key] for key in neighbors_keys]  # [(input_ids, attn_masks, labels) * k]
+            indices = indices.squeeze(0)
+            neighbors  = [list(self.memory.values())[idx] for idx in indices]  # [(input_ids, attn_masks, labels) * k]
             batch = self._prepare_batch(neighbors)  # ([],[],[])
             samples.append(batch)
 
-        return samples
+        return samples  # [([],[],[]),([],[],[]),([],[],[])]
     
     def sample(self, sample_size):
         
         keys = random.sample(list(self.memory),sample_size)  #随机采样key
-        input_ids = np.array([self.memory[k][0] for k in keys])
-        attn_masks = np.array([self.memory[k][1] for k in keys])
-        labels = np.array([self.memory[k][2] for k in keys])
+        input_ids = [self.memory[k][0] for k in keys]
+        attn_masks = [self.memory[k][1] for k in keys]
+        labels = [self.memory[k][2] for k in keys]
         
-        return (torch.LongTensor(input_ids), torch.LongTensor(attn_masks), torch.LongTensor(labels))
+        return (input_ids, attn_masks, labels)
         
 
 
@@ -96,8 +96,8 @@ class MbPAplusplus(CL_Base_Model):
     Implements Memory based Parameter Adaptation model
     """
 
-    def __init__(self, model, tokenizer, optimizer, train_task_list, eval_task_list, args, L=30, K_neightbors=32, replay_size=64):
-        super().__init__(model, tokenizer, optimizer, train_task_list, eval_task_list, args)
+    def __init__(self, model, tokenizer, optimizer, train_task_list, eval_task_list, test_task_list, args, L=30, K_neightbors=32, replay_size=64):
+        super().__init__(model, tokenizer, optimizer, train_task_list, eval_task_list, test_task_list, args)
         self.REPLAY_FREQ = 0  #  多少step后replay
         self.L = L                      #  replay多少轮
         self.memory = ReplayMemory()
@@ -137,16 +137,15 @@ class MbPAplusplus(CL_Base_Model):
                 # if (step+1) % self.REPLAY_FREQ == 0 and i_task!=0 and len(self.memory.memory) >= self.sample_size:
                 if (step+1) % self.REPLAY_FREQ == 0 and len(self.memory.memory) >= self.replay_size:
                     # sample 64 examples from memory
-                    input_ids, attn_masks, labels = self.memory.sample(sample_size=self.replay_size)
+                    S_input_ids, S_attn_masks, S_labels = self.memory.sample(sample_size=self.replay_size)
                     
-                    steps = self.replay_size/self.train_batch_size
-                    for i in range(steps):
+                    for i in range(self.replay_size):
                     
-                        input_ids = input_ids[i*self.train_batch_size:(i+1)*self.train_batch_size].to("cuda")
-                        attn_masks = attn_masks[i*self.train_batch_size:(i+1)*self.train_batch_size].to("cuda")
-                        labels = labels[i*self.train_batch_size:(i+1)*self.train_batch_size].to("cuda")
+                        input_ids = S_input_ids[i].unsqueeze(0).to("cuda")
+                        attn_masks = S_attn_masks[i].unsqueeze(0).to("cuda")
+                        labels = S_labels[i].unsqueeze(0).to("cuda")
 
-                        outputs = self.model(input_ids=batch['input_ids'], labels=batch['labels'], attention_mask=batch['attention_mask'])
+                        outputs = self.model(input_ids=input_ids, labels=labels, attention_mask=attn_masks)
                         loss = outputs.loss
                         # Backward pass
                         self.model.backward(loss)
@@ -175,49 +174,50 @@ class MbPAplusplus(CL_Base_Model):
                 keys = outputs.hidden_states[-1]  #最后一层的输出，hidden_states
                 keys = keys[:, 0, :].squeeze(1) #取第一个token, (bs, hidden_size)
                 # Push the examples into the replay memory
-                self.memory.push(keys.detach().cpu(), (batch['input_ids'].cpu().numpy(),
-                                                batch['attention_mask'].cpu().numpy(), batch['labels'].cpu().numpy()))
+                self.memory.push(keys.detach().cpu(), (batch['input_ids'].cpu(),
+                                                batch['attention_mask'].cpu(), batch['labels'].cpu()))
                 
     def infer(self, input_ids, attn_mask, R_input_ids, R_attn_masks, R_labels):
 
 
         # create a local copy of the classifier network
-        adaptive_model = copy.deepcopy(self.model)
 
         # Current model weights
         base_weights = list(self.model.parameters())
         # Train the adaptive classifier for L epochs with the rt_batch
         for _ in range(self.L):
+            for i in range(len(R_input_ids)):
+                
+                R_outputs = self.model(input_ids=R_input_ids[i], attention_mask=R_attn_masks[i], labels=R_labels[i])
+                R_loss = R_outputs.loss
+                # Initialize diff_loss to zero and place it on the appropriate device
+                diff_loss = torch.Tensor([0]).to(
+                    "cuda" if torch.cuda.is_available() else "cpu")
+                # Iterate over base_weights and curr_weights and accumulate the euclidean norm
+                # of their differences
+                curr_weights = list(self.adaptive_model.parameters())
+                for base_param, curr_param in zip(base_weights, curr_weights):
+                    diff_loss += (curr_param-base_param).pow(2).sum()
 
-            R_outputs = adaptive_model(R_input_ids, attention_mask=R_attn_masks, labels=R_labels)
-            R_loss = R_outputs.loss
-            # Initialize diff_loss to zero and place it on the appropriate device
-            diff_loss = torch.Tensor([0]).to(
-                "cuda" if torch.cuda.is_available() else "cpu")
-            # Iterate over base_weights and curr_weights and accumulate the euclidean norm
-            # of their differences
-            curr_weights = list(adaptive_model.parameters())
-            for base_param, curr_param in zip(base_weights, curr_weights):
-                diff_loss += (curr_param-base_param).pow(2).sum()
-
-            # Total loss due to log likelihood and weight restraint
-            total_loss = 0.001*diff_loss + R_loss
-            self.model.backward(total_loss)
-            self.model.step()
+                # Total loss due to log likelihood and weight restraint
+                total_loss = 0.001*diff_loss + R_loss
+                self.model.backward(total_loss)
+                self.model.step()
         
-        infer_outputs = adaptive_model(input_ids=input_ids,  attention_mask=attn_mask)
+        infer_outputs = self.model(input_ids=input_ids,  attention_mask=attn_mask)
+        
+        #param restore
+        for idx,name, param in enumerate(self.model.named_parameters()):
+            param.data.copy_(base_weights[idx])
         return infer_outputs
 
-
+    def evaluate(self, round, i_task, task):
+        eval_task_names = list(self.eval_task_list.keys())[:i_task+1]
+        for eval_task_name in eval_task_names:
+            self.evaluate_one_task(eval_task_name)
     
-    def evaluate(self, task, i_task):
-        
-        adaptive_model = copy.deepcopy(self.model)
-        
-        #current model weights
-        curr_weights = list(adaptive_model.parameters())
-        
-        
+    def evaluate_one_task(self, task):
+                
         eval_dataloader = self.eval_task_list[task]
         for step, batch in enumerate(eval_dataloader):
             del batch['sources']
@@ -225,10 +225,10 @@ class MbPAplusplus(CL_Base_Model):
             input_ids = batch['input_ids']
             attn_masks = batch['attention_mask']
             eval_keys = self.get_keys(batch)
-            neightbors_samples = self.memory.get_neighbours(eval_keys, self.K_neightbors)
+            neightbors_samples = self.memory.get_neighbours(eval_keys, self.K_neightbors)   #[([],[],[]),([],[],[]),([],[],[])]
             
             for input_ids, attn_mask, (rt_input_ids, rt_attn_masks, rt_labels) in tqdm(zip(input_ids, attn_masks, neightbors_samples), total=len(input_ids)):
-                rt_input_ids.to('cuda')
-                rt_attn_masks.to('cuda')
-                rt_labels.to('cuda')
+                rt_input_ids = [r_input_ids.to("cuda") for r_input_ids in rt_input_ids]
+                rt_attn_masks = [r_attn_masks.to("cuda") for r_attn_masks in rt_attn_masks]
+                rt_labels = [r_labels.to("cuda") for r_labels in rt_labels]
                 outputs = self.infer(input_ids, attn_mask, rt_input_ids, rt_attn_masks, rt_labels)

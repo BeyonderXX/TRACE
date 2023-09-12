@@ -10,10 +10,10 @@ from utils.utils import print_rank_0, to_device, get_all_reduce_mean
 
 class O_LoRA(CL_Base_Model):
     def __init__(self,
-                 model, tokenizer, optimizer, train_task_list, eval_task_list, args,
+                 model, tokenizer, optimizer, train_task_list, eval_task_list, test_task_list, args,
                  lamda_1 = 0.5, lamda_2 = 0
                  ):
-        super().__init__(model, tokenizer, optimizer, train_task_list, eval_task_list, args)
+        super().__init__(model, tokenizer, optimizer, train_task_list, eval_task_list, test_task_list, args)
         '''
         orthological to previous adapters
         '''

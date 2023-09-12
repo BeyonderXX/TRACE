@@ -70,7 +70,7 @@ class ResMLP(torch.nn.Module):
 
 class PP(CL_Base_Model):
     def __init__(self,
-                 model, tokenizer, optimizer, train_task_list, eval_task_list, args,
+                 model, tokenizer, optimizer, train_task_list, eval_task_list, test_task_list, args,
                  prefix_len=20,
                  prefix_path=None, # path to the pre-trained progressive prompt
                  freeze_weights=True,
@@ -131,7 +131,7 @@ class PP(CL_Base_Model):
         
         
         """
-        super().__init__(model, tokenizer, optimizer, train_task_list, eval_task_list, args)
+        super().__init__(model, tokenizer, optimizer, train_task_list, eval_task_list, test_task_list, args)
         self.freeze_weights = freeze_weights
         self.seq_len = seq_len
         self.early_stopping = early_stopping
@@ -213,7 +213,7 @@ class PP(CL_Base_Model):
                                           inputs_embeds], axis=1)
             full_prefix_len = prompt.shape[0]
             
-        source_mask_updated = torch.concat((batch["attention_mask"][0][0].repeat(k,full_prefix_len),
+        source_mask_updated = torch.concat((torch.tensor(1).to("cuda").repeat(k,full_prefix_len),
                                              batch["attention_mask"]), axis=1)
 
         lm_labels = torch.concat((lm_labels[0][0].repeat(k,inputs_embeds.shape[1]-lm_labels.shape[1]),lm_labels),axis=1)
@@ -348,7 +348,7 @@ class PP(CL_Base_Model):
             self.progress_previous_prompts(task=task)
             # model.model.prompt.data = deepcopy(old_prompt.data)
 
-def convert_model(model, args):
+def convert_PP_model(model, args):
     
     def init_new_prompt(prompt_len):
         N = model.model.decoder.embed_tokens.weight.shape[0]
