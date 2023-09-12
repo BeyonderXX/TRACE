@@ -7,6 +7,15 @@ import copy
 import random
 from model.base_model import CL_Base_Model
 from tqdm import tqdm
+from utils.utils import print_rank_0, to_device, save_hf_format, set_random_seed, get_all_reduce_mean, get_optimizer_grouped_parameters, save_zero_three_model, load_hf_tokenizer
+from evaluations import eval_ScienceQA, eval_MeetingBank, eval_PapyrusF, eval_CStance, eval_Py150, eval_FOMC, eval_NumGLUE_cm, eval_NumGLUE_ds # to be continued
+from transformers import GenerationConfig
+import json
+generation_config = GenerationConfig(
+    temperature=0.1,
+    do_sample=True,
+    num_return_sequences=1
+)
 
 class ReplayMemory(object):
     """
@@ -177,13 +186,11 @@ class MbPAplusplus(CL_Base_Model):
                 self.memory.push(keys.detach().cpu(), (batch['input_ids'].cpu(),
                                                 batch['attention_mask'].cpu(), batch['labels'].cpu()))
                 
-    def infer(self, input_ids, attn_mask, R_input_ids, R_attn_masks, R_labels):
-
-
-        # create a local copy of the classifier network
-
+                
+                
+    def replay_with_neighbors(self, R_input_ids, R_attn_masks, R_labels, base_weights):
         # Current model weights
-        base_weights = list(self.model.parameters())
+        self.model.train()
         # Train the adaptive classifier for L epochs with the rt_batch
         for _ in range(self.L):
             for i in range(len(R_input_ids)):
@@ -203,32 +210,122 @@ class MbPAplusplus(CL_Base_Model):
                 total_loss = 0.001*diff_loss + R_loss
                 self.model.backward(total_loss)
                 self.model.step()
-        
-        infer_outputs = self.model(input_ids=input_ids,  attention_mask=attn_mask)
-        
-        #param restore
-        for idx,name, param in enumerate(self.model.named_parameters()):
-            param.data.copy_(base_weights[idx])
-        return infer_outputs
-
-    def evaluate(self, round, i_task, task):
-        eval_task_names = list(self.eval_task_list.keys())[:i_task+1]
-        for eval_task_name in eval_task_names:
-            self.evaluate_one_task(eval_task_name)
-    
-    def evaluate_one_task(self, task):
                 
-        eval_dataloader = self.eval_task_list[task]
-        for step, batch in enumerate(eval_dataloader):
-            del batch['sources']
-            batch = {k:batch[k].to('cuda') for k in batch}
-            input_ids = batch['input_ids']
-            attn_masks = batch['attention_mask']
-            eval_keys = self.get_keys(batch)
-            neightbors_samples = self.memory.get_neighbours(eval_keys, self.K_neightbors)   #[([],[],[]),([],[],[]),([],[],[])]
-            
-            for input_ids, attn_mask, (rt_input_ids, rt_attn_masks, rt_labels) in tqdm(zip(input_ids, attn_masks, neightbors_samples), total=len(input_ids)):
-                rt_input_ids = [r_input_ids.to("cuda") for r_input_ids in rt_input_ids]
-                rt_attn_masks = [r_attn_masks.to("cuda") for r_attn_masks in rt_attn_masks]
-                rt_labels = [r_labels.to("cuda") for r_labels in rt_labels]
-                outputs = self.infer(input_ids, attn_mask, rt_input_ids, rt_attn_masks, rt_labels)
+
+
+
+    def evaluate(self, round, infer_task_id, task):
+        self.evaluate_one_task(infer_task_id, task)
+        
+    
+    def evaluate_one_task(self, i_task, task):
+                
+        if self.args.local_rank == -1:
+            device = torch.device("cuda")
+        else:
+            torch.cuda.set_device(self.args.local_rank)
+            device = torch.device("cuda", self.args.local_rank)
+
+        infer_dataloader = self.test_task_list[task]
+
+        progress_bar = tqdm(total=len(infer_dataloader), leave=True, disable=(self.args.global_rank != 0))
+                
+        def prediction(model, infer_dataloader):
+            predicted_sequences = []
+            sources_sequences = []
+            for step, batch in enumerate(infer_dataloader):
+
+                sources_sequences += batch['sources']
+                del batch['sources']
+                batch = to_device(batch, device)
+                input_ids = batch['input_ids']
+                attn_masks = batch['attention_mask']
+                eval_keys = self.get_keys(batch)
+                neightbors_samples = self.memory.get_neighbours(eval_keys, self.K_neightbors)   #[([],[],[]),([],[],[]),([],[],[])]
+                progress_bar.update(1)
+                prompt_len = batch['input_ids'].shape[1]
+
+                # update progress bar
+                if self.args.global_rank == 0:
+                    progress_bar.update(1)
+                    description = f"Step {step}"
+                    progress_bar.set_description(description, refresh=False)
+
+ 
+                for input_ids, attn_mask, (rt_input_ids, rt_attn_masks, rt_labels) in tqdm(zip(input_ids, attn_masks, neightbors_samples), total=len(input_ids)):
+                    
+                    #Replay for each sample
+                    base_weights = list(self.model.parameters())
+
+                    rt_input_ids = [r_input_ids.to("cuda") for r_input_ids in rt_input_ids]
+                    rt_attn_masks = [r_attn_masks.to("cuda") for r_attn_masks in rt_attn_masks]
+                    rt_labels = [r_labels.to("cuda") for r_labels in rt_labels]
+                    self.replay_with_neighbors(rt_input_ids, rt_attn_masks, rt_labels, base_weights)
+                    
+                    self.model.eval()
+                    with torch.no_grad():
+                        generate_ids = model.generate(input_ids=input_ids,
+                                                    attention_mask=attn_mask,
+                                                    max_new_tokens=self.args.max_ans_len,
+                                                    bos_token_id=self.tokenizer.bos_token_id,
+                                                    eos_token_id=self.tokenizer.eos_token_id,
+                                                    pad_token_id=self.tokenizer.unk_token_id,
+                                                    generation_config=generation_config,
+                                                    )
+
+                    sequences = self.tokenizer.batch_decode(generate_ids[:, prompt_len:], skip_special_tokens=True,
+                                                    clean_up_tokenization_spaces=False)
+                    predicted_sequences += sequences
+                    
+                    #param restore
+                    for idx,name, param in enumerate(self.model.named_parameters()):
+                        param.data.copy_(base_weights[idx])
+
+            return sources_sequences, predicted_sequences
+
+
+        def save_inference_results(evaluation_result: dict, sources_sequences: list, predicted_sequences: list,
+                                   ground_truths: list, round: int, i_task: int, task: str):
+            # save as a json file
+            df = {"eval": evaluation_result, 'prompts': sources_sequences, 'results': predicted_sequences,
+                  'labels': ground_truths}
+            with open(self.args.output_dir + "/results-" + str(round) + "-" + str(i_task) + "-" + task + ".json", "w", encoding='utf-8') as file:
+                json.dump(df, file, ensure_ascii=False)
+
+
+        # Inference !
+        print_rank_0("***** Start inference *****", self.args.global_rank)
+        sources_sequences, predicted_sequences = prediction(self.model, infer_dataloader)
+
+        with open(self.args.data_path + "/" + task + "/test.json", "r", encoding="utf-8") as file:
+            testset = json.load(file)
+        ground_truths = []
+        for item in testset:
+            ground_truths.append(item["answer"])
+
+        # Get Accuracy/ROUGE/BLEU/...
+        # The evaluation result is stored in a dictionary. e.g. {"accuracy": .., "rouge-L": ..}
+        if task == "ScienceQA":
+            evaluation_result = eval_ScienceQA.eval(predicted_sequences, ground_truths)
+        elif task == "MeetingBank":
+            evaluation_result = eval_MeetingBank.eval(predicted_sequences, ground_truths)
+        elif task == "C-STANCE":
+            evaluation_result = eval_CStance.eval(predicted_sequences, ground_truths)
+        elif task == "Papyrus-f":
+            evaluation_result = eval_PapyrusF.eval(predicted_sequences, ground_truths)
+        elif task == "Py150":
+            evaluation_result = eval_Py150.eval(predicted_sequences, ground_truths)
+        elif task == "FOMC":
+            evaluation_result = eval_FOMC.eval(predicted_sequences, ground_truths)
+        elif task == "NumGLUE-cm":
+            evaluation_result = eval_NumGLUE_cm.eval(predicted_sequences, ground_truths)
+        elif task == "NumGLUE-ds":
+            evaluation_result = eval_NumGLUE_ds.eval(predicted_sequences, ground_truths)
+        # elif task == "ToolBench":
+        #     evaluation_result = eval_ToolBench.eval(predicted_sequences, ground_truths)
+        else:
+            evaluation_result = {}
+
+        if self.args.global_rank <= 0:
+            print("***** Saving inference results *****")
+            save_inference_results(evaluation_result, sources_sequences, predicted_sequences, ground_truths, round, i_task, task)

@@ -40,13 +40,13 @@ class CL_Base_Model:
     def train_continual(self):
         for i_task, task in enumerate(self.train_task_list):
             self.train_one_task(task, i_task, self.args.num_train_epochs)
-            for j_task, _task in enumerate(self.train_task_list):
-                if j_task > i_task:
+            for infer_task_id, _task in enumerate(self.train_task_list):
+                if infer_task_id > i_task:
                     break
-                self.evaluate(i_task, j_task, _task)
+                self.evaluate(i_task, infer_task_id, _task)
             
             
-    def evaluate(self, round, i_task, task):
+    def evaluate(self, round, infer_task_id, task):
         #评估，不同的dataset对应不同的metrics
         if self.args.local_rank == -1:
             device = torch.device("cuda")
@@ -145,7 +145,7 @@ class CL_Base_Model:
 
         if self.args.global_rank <= 0:
             print("***** Saving inference results *****")
-            save_inference_results(evaluation_result, sources_sequences, predicted_sequences, ground_truths, round, i_task, task)
+            save_inference_results(evaluation_result, sources_sequences, predicted_sequences, ground_truths, round, infer_task_id, task)
 
     
     def save_model(self):
