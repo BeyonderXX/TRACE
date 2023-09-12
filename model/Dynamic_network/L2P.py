@@ -7,6 +7,15 @@ from torch import nn
 from model.base_model import CL_Base_Model
 import numpy as np
 from deepspeed.utils import safe_get_full_grad
+from utils.utils import print_rank_0, to_device, save_hf_format, set_random_seed, get_all_reduce_mean, get_optimizer_grouped_parameters, save_zero_three_model, load_hf_tokenizer
+from evaluations import eval_ScienceQA, eval_MeetingBank, eval_PapyrusF, eval_CStance, eval_Py150, eval_FOMC, eval_NumGLUE_cm, eval_NumGLUE_ds # to be continued
+from transformers import GenerationConfig
+import json
+generation_config = GenerationConfig(
+    temperature=0.1,
+    do_sample=True,
+    num_return_sequences=1
+)
 
 
 def convert_L2P_model(model, args):
@@ -19,7 +28,7 @@ def convert_L2P_model(model, args):
                 with torch.no_grad():
                     j = np.random.randint(N) # random token
                     w = deepcopy(args.embed_tokens.weight[j].detach().cpu().numpy())
-                    prompt_weight.append(w/100)
+                    prompt_weight.append(w)
                     # prompt_weigths.append(w)
             prompt_weigths.append(prompt_weight)
 
@@ -124,31 +133,6 @@ class L2P(CL_Base_Model):
 
         loss -= reduce_sim * self.pull_constraint_coeff
         return loss
-
-
-        
-        
-
-        # out['prompt_idx'] = idx
-
-        # # Debugging, return sim as well
-        # out['prompt_norm'] = prompt_norm
-        # out['inputs_embeds_norm'] = inputs_embeds_norm
-        # out['similarity'] = similarity
-
-        # # Put pull_constraint loss calculation inside
-        # batched_key_norm = prompt_norm[idx] # B, top_k, C
-        # out['selected_key'] = batched_key_norm
-        # inputs_embeds_norm = inputs_embeds_norm.unsqueeze(1) # B, 1, C
-        # sim = batched_key_norm * inputs_embeds_norm # B, top_k, C
-        # reduce_sim = torch.sum(sim) / inputs_embeds.shape[0] # Scalar
-
-        # out['reduce_sim'] = reduce_sim
-
-        
-        # # The input with the prompt concatenated to the front. [B, prompt+token, C]
-        # out['total_prompt_len'] = batched_prompt.shape[1]
-        # out['prompted_embedding'] = torch.cat([batched_prompt, inputs_embeds], dim=1)
     
     
     
@@ -177,12 +161,139 @@ class L2P(CL_Base_Model):
                     description = f"Epoch {epoch+1}, Step {step}, Loss: {loss.item():.4f}"
                     progress_bar.set_description(description, refresh=False)
                 self.model.backward(loss, retain_graph=True)
-                # for n, lp in self.model.named_parameters():
-                #     # 1. gradient lookup
-                #     # For zero1 and zero2, gradient lookup must be called after `backward` and before `step`
-                #     # For zero3, gradient lookup must be called after `backward`
-                #     hp_grad = safe_get_full_grad(lp)
-                #     if self.args.global_rank == 0:
+                for n, lp in self.model.named_parameters():
+                    # 1. gradient lookup
+                    # For zero1 and zero2, gradient lookup must be called after `backward` and before `step`
+                    # For zero3, gradient lookup must be called after `backward`
+                    if "prompt" in n:
+                        hp_grad = safe_get_full_grad(lp)
+                        if self.args.global_rank == 0:
 
-                #         print(hp_grad)
+                            print(hp_grad)
                 self.model.step()
+                
+                
+    def evaluate(self, round, infer_task_id, task):
+        self.evaluate_one_task(infer_task_id, task)
+        
+    def evaluate_one_task(self, infer_task_id, task):
+        if self.args.local_rank == -1:
+            device = torch.device("cuda")
+        else:
+            torch.cuda.set_device(self.args.local_rank)
+            device = torch.device("cuda", self.args.local_rank)
+
+        infer_dataloader = self.test_task_list[task]
+
+        progress_bar = tqdm(total=len(infer_dataloader), leave=True, disable=(self.args.global_rank != 0))
+        
+        def prediction(model, infer_dataloader):
+            predicted_sequences = []
+            sources_sequences = []
+            model.eval()
+
+            for step, batch in enumerate(infer_dataloader):
+
+                sources_sequences += batch['sources']
+                del batch['sources']
+                batch = to_device(batch, device)
+                progress_bar.update(1)
+                prompt_len = batch['input_ids'].shape[1]
+
+                # update progress bar
+                if self.args.global_rank == 0:
+                    progress_bar.update(1)
+                    description = f"Step {step}"
+                    progress_bar.set_description(description, refresh=False)
+
+                with torch.no_grad():
+                    # TODO, add more inference params
+                    # backbone config
+                    # generate_ids = model.generate(batch['input_ids'], max_new_tokens=args.max_ans_len,
+                    #                               pad_token_id=tokenizer.eos_token_id, attention_mask = batch['attention_mask'], temperature=0.7, do_sample=True, repetition_penalty=2.0 )
+
+                    # sft config
+                    input_ids = batch['input_ids']
+                    attn_masks = batch['attention_mask']
+                    inputs_embeds = self.embed_tokens(input_ids)
+
+                    if self.embedding_key == 'mean':
+                        inputs_embeds_mean = torch.mean(inputs_embeds, dim=1)
+
+                    prompt_norm = self.l2_normalize(self.prompt_key, dim=1).to("cuda") # Pool_size, C
+                    inputs_embeds_norm = self.l2_normalize(inputs_embeds_mean, dim=1) # B, C
+
+                    similarity = torch.matmul(inputs_embeds_norm, prompt_norm.t()) # B, Pool_size
+
+                    _, idx = torch.topk(similarity, k=self.top_k, dim=1) # B, top_k
+                        
+
+                    batched_prompt_raw = self.model.model.prompt[idx] # B, top_k, length, C
+                    batch_size, top_k, length, c = batched_prompt_raw.shape
+                    batched_prompt = batched_prompt_raw.reshape(batch_size, top_k * length, c) # B, top_k * length, C
+                    inputs_embeds = torch.cat([batched_prompt, inputs_embeds],axis=1)
+                    
+                    prefix_length = batched_prompt.shape[1]
+                    attn_masks = torch.concat((torch.tensor(1).to("cuda").repeat(batch_size,prefix_length),attn_masks), axis=1)                    
+                    
+                    generate_ids = model.generate(inputs_embeds=inputs_embeds,
+                                                  attention_mask=attn_masks,
+                                                  max_new_tokens=self.args.max_ans_len,
+                                                  bos_token_id=self.tokenizer.bos_token_id,
+                                                  eos_token_id=self.tokenizer.eos_token_id,
+                                                  pad_token_id=self.tokenizer.unk_token_id,
+                                                  generation_config=generation_config,
+                                                  )
+
+                sequences = self.tokenizer.batch_decode(generate_ids[:, prompt_len:], skip_special_tokens=True,
+                                                   clean_up_tokenization_spaces=False)
+                predicted_sequences += sequences
+
+            return sources_sequences, predicted_sequences
+
+
+        def save_inference_results(evaluation_result: dict, sources_sequences: list, predicted_sequences: list,
+                                   ground_truths: list, round: int, i_task: int, task: str):
+            # save as a json file
+            df = {"eval": evaluation_result, 'prompts': sources_sequences, 'results': predicted_sequences,
+                  'labels': ground_truths}
+            with open(self.args.output_dir + "/results-" + str(round) + "-" + str(i_task) + "-" + task + ".json", "w", encoding='utf-8') as file:
+                json.dump(df, file, ensure_ascii=False)
+
+
+        # Inference !
+        print_rank_0("***** Start inference *****", self.args.global_rank)
+        sources_sequences, predicted_sequences = prediction(self.model, infer_dataloader)
+
+        with open(self.args.data_path + "/" + task + "/test.json", "r", encoding="utf-8") as file:
+            testset = json.load(file)
+        ground_truths = []
+        for item in testset:
+            ground_truths.append(item["answer"])
+
+        # Get Accuracy/ROUGE/BLEU/...
+        # The evaluation result is stored in a dictionary. e.g. {"accuracy": .., "rouge-L": ..}
+        if task == "ScienceQA":
+            evaluation_result = eval_ScienceQA.eval(predicted_sequences, ground_truths)
+        elif task == "MeetingBank":
+            evaluation_result = eval_MeetingBank.eval(predicted_sequences, ground_truths)
+        elif task == "C-STANCE":
+            evaluation_result = eval_CStance.eval(predicted_sequences, ground_truths)
+        elif task == "Papyrus-f":
+            evaluation_result = eval_PapyrusF.eval(predicted_sequences, ground_truths)
+        elif task == "Py150":
+            evaluation_result = eval_Py150.eval(predicted_sequences, ground_truths)
+        elif task == "FOMC":
+            evaluation_result = eval_FOMC.eval(predicted_sequences, ground_truths)
+        elif task == "NumGLUE-cm":
+            evaluation_result = eval_NumGLUE_cm.eval(predicted_sequences, ground_truths)
+        elif task == "NumGLUE-ds":
+            evaluation_result = eval_NumGLUE_ds.eval(predicted_sequences, ground_truths)
+        # elif task == "ToolBench":
+        #     evaluation_result = eval_ToolBench.eval(predicted_sequences, ground_truths)
+        else:
+            evaluation_result = {}
+
+        if self.args.global_rank <= 0:
+            print("***** Saving inference results *****")
+            save_inference_results(evaluation_result, sources_sequences, predicted_sequences, ground_truths, round, infer_task_id, task)
