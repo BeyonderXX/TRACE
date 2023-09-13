@@ -112,7 +112,7 @@ class CL_Base_Model:
                     break
                 self.evaluate(i_task, infer_task_id, _task)
 
-    def dist_results_gather(self, generate_ids, pad_token):
+    def dist_results_gather(self, generate_ids, pad_token=-1):
         # (batch_size, seq_len)
         result = generate_ids  # Example tensor
         device = torch.device("cuda", self.args.local_rank)
@@ -158,9 +158,17 @@ class CL_Base_Model:
         def prediction(model, infer_dataloader):
             predicted_sequences = []
             sources_sequences = []
+            label_sequences = []
             model.eval()
 
             for step, batch in enumerate(infer_dataloader):
+                ground_truths_ids = self.tokenizer(batch['gts'], 
+                                                   truncation=True,
+                                                   max_length=self.args.max_ans_len,
+                                                   add_special_tokens=False,
+                                                   padding='max_length',
+                                                   return_tensors='pt')
+                del batch['gts']
                 del batch['sources']
                 batch = to_device(batch, device)
                 progress_bar.update(1)
@@ -186,14 +194,17 @@ class CL_Base_Model:
                     
                 # add for distributed 
                 gathered_ids, max_seq_len = self.dist_results_gather(generate_ids, self.tokenizer.eos_token_id)
+                gathered_labels, max_label_len = self.dist_results_gather(ground_truths_ids, self.tokenizer.eos_token_id)
 
                 if self.args.global_rank <= 0:
                     sou_sequences = self.tokenizer.batch_decode(gathered_ids[:, : max_seq_len], skip_special_tokens=True, clean_up_tokenization_spaces=False)
                     pre_sequences = self.tokenizer.batch_decode(gathered_ids[:, max_seq_len:], skip_special_tokens=True, clean_up_tokenization_spaces=False)
+                    lab_sequences = self.tokenizer.batch_decode(gathered_labels[:, : max_label_len], skip_special_tokens=True, clean_up_tokenization_spaces=False)
                     predicted_sequences += pre_sequences
                     sources_sequences += sou_sequences
+                    label_sequences += lab_sequences
 
-            return sources_sequences, predicted_sequences
+            return sources_sequences, predicted_sequences, label_sequences
 
 
         def save_inference_results(evaluation_result: dict, sources_sequences: list, predicted_sequences: list,
@@ -207,17 +218,9 @@ class CL_Base_Model:
             with open(self.args.output_dir + "/results-" + str(round) + "-" + str(i_task) + "-" + task + ".json", "w+", encoding='utf-8') as file:
                 json.dump(df, file, ensure_ascii=False)
 
-
         # Inference !
         print_rank_0("***** Start inference *****", self.args.global_rank)
-        sources_sequences, predicted_sequences = prediction(self.model, infer_dataloader)
-
-        with open(self.args.data_path + "/" + task + "/test.json", "r+", encoding="utf-8") as file:
-            testset = json.load(file)
-        ground_truths = []
-        
-        for item in testset:
-            ground_truths.append(item["answer"])
+        sources_sequences, predicted_sequences, ground_truths = prediction(self.model, infer_dataloader)
 
         # Get Accuracy/ROUGE/BLEU/...
         # The evaluation result is stored in a dictionary. e.g. {"accuracy": .., "rouge-L": ..}
@@ -242,7 +245,6 @@ class CL_Base_Model:
             #     evaluation_result = eval_ToolBench.eval(predicted_sequences, ground_truths)
             else:
                 evaluation_result = {}
-
 
             print("***** Saving inference results *****")
             save_inference_results(evaluation_result, sources_sequences, predicted_sequences, ground_truths, round, infer_task_id, task)
