@@ -11,6 +11,7 @@ from utils.utils import print_rank_0, to_device, save_hf_format, set_random_seed
 from evaluations import eval_ScienceQA, eval_MeetingBank, eval_PapyrusF, eval_CStance, eval_Py150, eval_FOMC, eval_NumGLUE_cm, eval_NumGLUE_ds # to be continued
 from transformers import GenerationConfig
 import json
+import os
 generation_config = GenerationConfig(
     temperature=0.1,
     do_sample=True,
@@ -161,15 +162,15 @@ class L2P(CL_Base_Model):
                     description = f"Epoch {epoch+1}, Step {step}, Loss: {loss.item():.4f}"
                     progress_bar.set_description(description, refresh=False)
                 self.model.backward(loss, retain_graph=True)
-                for n, lp in self.model.named_parameters():
-                    # 1. gradient lookup
-                    # For zero1 and zero2, gradient lookup must be called after `backward` and before `step`
-                    # For zero3, gradient lookup must be called after `backward`
-                    if "prompt" in n:
-                        hp_grad = safe_get_full_grad(lp)
-                        if self.args.global_rank == 0:
+                # for n, lp in self.model.named_parameters():
+                #     # 1. gradient lookup
+                #     # For zero1 and zero2, gradient lookup must be called after `backward` and before `step`
+                #     # For zero3, gradient lookup must be called after `backward`
+                #     if "prompt" in n:
+                #         hp_grad = safe_get_full_grad(lp)
+                #         if self.args.global_rank == 0:
 
-                            print(hp_grad)
+                #             print(hp_grad)
                 self.model.step()
                 
                 
@@ -190,15 +191,20 @@ class L2P(CL_Base_Model):
         def prediction(model, infer_dataloader):
             predicted_sequences = []
             sources_sequences = []
+            label_sequences = []
             model.eval()
 
             for step, batch in enumerate(infer_dataloader):
-
-                sources_sequences += batch['sources']
+                ground_truths_ids = self.tokenizer(batch['gts'], 
+                                                   truncation=True,
+                                                   max_length=self.args.max_ans_len,
+                                                   add_special_tokens=False,
+                                                   padding='max_length',
+                                                   return_tensors='pt')
+                del batch['gts']
                 del batch['sources']
                 batch = to_device(batch, device)
                 progress_bar.update(1)
-                prompt_len = batch['input_ids'].shape[1]
 
                 # update progress bar
                 if self.args.global_rank == 0:
@@ -207,11 +213,6 @@ class L2P(CL_Base_Model):
                     progress_bar.set_description(description, refresh=False)
 
                 with torch.no_grad():
-                    # TODO, add more inference params
-                    # backbone config
-                    # generate_ids = model.generate(batch['input_ids'], max_new_tokens=args.max_ans_len,
-                    #                               pad_token_id=tokenizer.eos_token_id, attention_mask = batch['attention_mask'], temperature=0.7, do_sample=True, repetition_penalty=2.0 )
-
                     # sft config
                     input_ids = batch['input_ids']
                     attn_masks = batch['attention_mask']
@@ -243,13 +244,22 @@ class L2P(CL_Base_Model):
                                                   eos_token_id=self.tokenizer.eos_token_id,
                                                   pad_token_id=self.tokenizer.unk_token_id,
                                                   generation_config=generation_config,
+                                                use_cache=False
+
                                                   )
+                # add for distributed 
+                gathered_ids, max_seq_len = self.dist_results_gather(generate_ids, self.tokenizer.eos_token_id)
+                gathered_labels, max_label_len = self.dist_results_gather(ground_truths_ids, self.tokenizer.eos_token_id)
 
-                sequences = self.tokenizer.batch_decode(generate_ids[:, prompt_len:], skip_special_tokens=True,
-                                                   clean_up_tokenization_spaces=False)
-                predicted_sequences += sequences
+                if self.args.global_rank <= 0:
+                    sou_sequences = self.tokenizer.batch_decode(gathered_ids[:, : max_seq_len], skip_special_tokens=True, clean_up_tokenization_spaces=False)
+                    pre_sequences = self.tokenizer.batch_decode(gathered_ids[:, max_seq_len:], skip_special_tokens=True, clean_up_tokenization_spaces=False)
+                    lab_sequences = self.tokenizer.batch_decode(gathered_labels[:, : max_label_len], skip_special_tokens=True, clean_up_tokenization_spaces=False)
+                    predicted_sequences += pre_sequences
+                    sources_sequences += sou_sequences
+                    label_sequences += lab_sequences
 
-            return sources_sequences, predicted_sequences
+            return sources_sequences, predicted_sequences, label_sequences
 
 
         def save_inference_results(evaluation_result: dict, sources_sequences: list, predicted_sequences: list,
@@ -257,43 +267,40 @@ class L2P(CL_Base_Model):
             # save as a json file
             df = {"eval": evaluation_result, 'prompts': sources_sequences, 'results': predicted_sequences,
                   'labels': ground_truths}
+            if not os.path.exists(self.args.output_dir):
+                os.makedirs(self.args.output_dir)
+
             with open(self.args.output_dir + "/results-" + str(round) + "-" + str(i_task) + "-" + task + ".json", "w+", encoding='utf-8') as file:
                 json.dump(df, file, ensure_ascii=False)
 
 
         # Inference !
         print_rank_0("***** Start inference *****", self.args.global_rank)
-        sources_sequences, predicted_sequences = prediction(self.model, infer_dataloader)
-
-        with open(self.args.data_path + "/" + task + "/test.json", "r+", encoding="utf-8") as file:
-            testset = json.load(file)
-        ground_truths = []
-        for item in testset:
-            ground_truths.append(item["answer"])
+        sources_sequences, predicted_sequences, ground_truths = prediction(self.model, infer_dataloader)
 
         # Get Accuracy/ROUGE/BLEU/...
         # The evaluation result is stored in a dictionary. e.g. {"accuracy": .., "rouge-L": ..}
-        if task == "ScienceQA":
-            evaluation_result = eval_ScienceQA.eval(predicted_sequences, ground_truths)
-        elif task == "MeetingBank":
-            evaluation_result = eval_MeetingBank.eval(predicted_sequences, ground_truths)
-        elif task == "C-STANCE":
-            evaluation_result = eval_CStance.eval(predicted_sequences, ground_truths)
-        elif task == "Papyrus-f":
-            evaluation_result = eval_PapyrusF.eval(predicted_sequences, ground_truths)
-        elif task == "Py150":
-            evaluation_result = eval_Py150.eval(predicted_sequences, ground_truths)
-        elif task == "FOMC":
-            evaluation_result = eval_FOMC.eval(predicted_sequences, ground_truths)
-        elif task == "NumGLUE-cm":
-            evaluation_result = eval_NumGLUE_cm.eval(predicted_sequences, ground_truths)
-        elif task == "NumGLUE-ds":
-            evaluation_result = eval_NumGLUE_ds.eval(predicted_sequences, ground_truths)
-        # elif task == "ToolBench":
-        #     evaluation_result = eval_ToolBench.eval(predicted_sequences, ground_truths)
-        else:
-            evaluation_result = {}
-
         if self.args.global_rank <= 0:
+            if task == "ScienceQA":
+                evaluation_result = eval_ScienceQA.eval(predicted_sequences, ground_truths)
+            elif task == "MeetingBank":
+                evaluation_result = eval_MeetingBank.eval(predicted_sequences, ground_truths)
+            elif task == "C-STANCE":
+                evaluation_result = eval_CStance.eval(predicted_sequences, ground_truths)
+            elif task == "Papyrus-f":
+                evaluation_result = eval_PapyrusF.eval(predicted_sequences, ground_truths)
+            elif task == "Py150":
+                evaluation_result = eval_Py150.eval(predicted_sequences, ground_truths)
+            elif task == "FOMC":
+                evaluation_result = eval_FOMC.eval(predicted_sequences, ground_truths)
+            elif task == "NumGLUE-cm":
+                evaluation_result = eval_NumGLUE_cm.eval(predicted_sequences, ground_truths)
+            elif task == "NumGLUE-ds":
+                evaluation_result = eval_NumGLUE_ds.eval(predicted_sequences, ground_truths)
+            # elif task == "ToolBench":
+            #     evaluation_result = eval_ToolBench.eval(predicted_sequences, ground_truths)
+            else:
+                evaluation_result = {}
+
             print("***** Saving inference results *****")
             save_inference_results(evaluation_result, sources_sequences, predicted_sequences, ground_truths, round, infer_task_id, task)
