@@ -297,7 +297,7 @@ def main():
         evaluation_result = eval_ScienceQA.eval(predicted_sequences, ground_truths)
     elif args.inference_task == "MeetingBank":
         evaluation_result = eval_MeetingBank.eval(predicted_sequences, ground_truths)
-    elif args.inference_task == "C-Stance":
+    elif args.inference_task == "C-STANCE":
         evaluation_result = eval_CStance.eval(predicted_sequences, ground_truths)
     elif args.inference_task == "Papyrus-f":
         evaluation_result = eval_PapyrusF.eval(predicted_sequences, ground_truths)
