@@ -200,7 +200,7 @@ class L2P(CL_Base_Model):
                                                    max_length=self.args.max_ans_len,
                                                    add_special_tokens=False,
                                                    padding='max_length',
-                                                   return_tensors='pt')
+                                                   return_tensors='pt')['input_ids'].to(device)
                 del batch['gts']
                 del batch['sources']
                 batch = to_device(batch, device)

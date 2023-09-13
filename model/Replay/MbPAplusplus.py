@@ -237,13 +237,12 @@ class MbPAplusplus(CL_Base_Model):
             label_sequences = []
             model.eval()
             for step, batch in enumerate(infer_dataloader):
-
                 ground_truths_ids = self.tokenizer(batch['gts'], 
                                                    truncation=True,
                                                    max_length=self.args.max_ans_len,
                                                    add_special_tokens=False,
                                                    padding='max_length',
-                                                   return_tensors='pt')
+                                                   return_tensors='pt')['input_ids'].to(device)
                 del batch['gts']
                 del batch['sources']
                 batch = to_device(batch, device)
