@@ -49,7 +49,7 @@ class EWC(CL_Base_Model):
     #计算惩罚loss
     def penalty(self):
         restrict_loss = 0
-        precision_matrices = self._diag_fisher()
+        precision_matrices = self.fisher
         for n, p in self.model.named_parameters():
             restrict_loss_params = precision_matrices[n] * (p - self._previous_params[n]) ** 2
             restrict_loss += restrict_loss_params.sum()
@@ -77,7 +77,7 @@ class EWC(CL_Base_Model):
     def save_grad(self,name):
         def hook(grad):
             grad = torch.nan_to_num(grad, nan=0)
-            grad = torch.clamp(grad, -self.args.ds_config['gradient_clipping'], self.args.ds_config['gradient_clipping'])
+            # grad = torch.clamp(grad, -self.args.ds_config['gradient_clipping'], self.args.ds_config['gradient_clipping'])
             self.grads[name] = grad
         return hook
     def retain_grad(self):
@@ -122,15 +122,16 @@ class EWC(CL_Base_Model):
         #在训练之前确定梯度
         self.retain_grad()
 
-        for num, task in enumerate(self.train_task_list):
-            self.task_num=num
+        for i_task, task in enumerate(self.train_task_list):
+            self.task_num=i_task
             self.train_one_task(task, self.args.num_train_epochs)
             self._regular_fisher()  
             
-            '''
-            每一步之后更新？还是一个任务更新一次？
-            '''
             self._update_previous_params()
+            for infer_task_id, _task in enumerate(self.train_task_list):
+                if infer_task_id > i_task:
+                    break
+                self.evaluate(i_task, infer_task_id, _task)
             
             
 

@@ -351,7 +351,7 @@ class PP(CL_Base_Model):
 def convert_PP_model(model, args):
     
     def init_new_prompt(prompt_len):
-        N = model.model.decoder.embed_tokens.weight.shape[0]
+        N = args.embed_tokens_length
         prompt_weigths = []
 
         for i in range(prompt_len):
