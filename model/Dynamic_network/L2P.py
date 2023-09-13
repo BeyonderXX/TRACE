@@ -174,9 +174,9 @@ class L2P(CL_Base_Model):
                 
                 
     def evaluate(self, round, infer_task_id, task):
-        self.evaluate_one_task(infer_task_id, task)
+        self.evaluate_one_task(round,infer_task_id, task)
         
-    def evaluate_one_task(self, infer_task_id, task):
+    def evaluate_one_task(self, round, infer_task_id, task):
         if self.args.local_rank == -1:
             device = torch.device("cuda")
         else:
@@ -257,7 +257,7 @@ class L2P(CL_Base_Model):
             # save as a json file
             df = {"eval": evaluation_result, 'prompts': sources_sequences, 'results': predicted_sequences,
                   'labels': ground_truths}
-            with open(self.args.output_dir + "/results-" + str(round) + "-" + str(i_task) + "-" + task + ".json", "w", encoding='utf-8') as file:
+            with open(self.args.output_dir + "/results-" + str(round) + "-" + str(i_task) + "-" + task + ".json", "w+", encoding='utf-8') as file:
                 json.dump(df, file, ensure_ascii=False)
 
 
@@ -265,7 +265,7 @@ class L2P(CL_Base_Model):
         print_rank_0("***** Start inference *****", self.args.global_rank)
         sources_sequences, predicted_sequences = prediction(self.model, infer_dataloader)
 
-        with open(self.args.data_path + "/" + task + "/test.json", "r", encoding="utf-8") as file:
+        with open(self.args.data_path + "/" + task + "/test.json", "r+", encoding="utf-8") as file:
             testset = json.load(file)
         ground_truths = []
         for item in testset:

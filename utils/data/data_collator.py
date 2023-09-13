@@ -59,6 +59,7 @@ class DataCollator:
     def decoder_call(self, batch, return_tensors):
         # to fix the bug
         sources = []
+        gts = []
         tokenized_sources = []
         label_lens = []  # 用于存储每个label的长度
         actual_max_len = 0  # 用于存储batch中的实际最大长度
@@ -68,6 +69,7 @@ class DataCollator:
             instruction = instance['prompt']
             label = instance['answer']
             sources.append(instruction)
+            gts.append(label)
 
             if not self.inference:
                 tokenized_label = self.tokenize(label, limit_len, add_bos_token=False, add_eos_token=True)
@@ -110,5 +112,7 @@ class DataCollator:
             model_inputs['labels'] = torch.tensor([source["labels"] for source in tokenized_sources])
 
         model_inputs['sources'] = sources
+        if self.inference:
+            model_inputs['gts'] = gts
 
         return model_inputs

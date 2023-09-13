@@ -385,9 +385,10 @@ def main():
         optimizer = AdamOptimizer(optimizer_grouped_parameters,
                                 lr=args.learning_rate,
                                 betas=(0.9, 0.95))
-
+        
+        total_train_dataloader_len = sum(len(train_task_list[task]) for task in list(train_task_list.keys()))
         num_update_steps_per_epoch = math.ceil(
-            len(train_dataloader) / args.gradient_accumulation_steps)
+            total_train_dataloader_len / args.gradient_accumulation_steps)
         lr_scheduler = get_scheduler(
             name=args.lr_scheduler_type,
             optimizer=optimizer,
@@ -405,6 +406,13 @@ def main():
             args.embed_tokens_dim = embed_tokens_shape[1]
             args.embed_tokens_length = embed_tokens_shape[0]
             args.embed_tokens = embed_tokens
+        elif "llama" in args.model_name_or_path.lower():
+            embed_tokens_shape = model.model.embed_tokens.weight.shape
+            embed_tokens = model.model.embed_tokens
+            
+            args.embed_tokens_dim = embed_tokens_shape[1]
+            args.embed_tokens_length = embed_tokens_shape[0]
+            args.embed_tokens = embed_tokens
             
         if args.CL_method=="PP":
             args.prefix_len = 20
@@ -416,10 +424,11 @@ def main():
             args.prompt_length = 5
             args.prompt_init = "uniform"
             model = convert_L2P_model(model, args)
-
-        
+            for name, params in model.named_parameters():
+                if "prompt" not in name:
+                    params.requires_grad=False
+                    
     optimizer, lr_scheduler = get_optimizer(model)
-
     model, optimizer, _, lr_scheduler = deepspeed.initialize(
         model=model,
         optimizer=optimizer,
