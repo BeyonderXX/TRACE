@@ -256,12 +256,6 @@ def main():
     print_rank_0("***** Start inference *****", args.local_rank)
     sources_sequences, predicted_sequences, ground_truths = prediction(model, infer_dataloader)
 
-    with open(args.data_path + "/test.json", "r", encoding="utf-8") as file:
-        testset = json.load(file)
-    ground_truths = []
-    for item in testset:
-        ground_truths.append(item["answer"])
-
     # Get Accuracy/ROUGE/BLEU/...
     # The evaluation result is stored in a dictionary. e.g. {"accuracy": .., "rouge-L": ..}
     if args.inference_task == "ScienceQA":
