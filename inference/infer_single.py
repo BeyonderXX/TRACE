@@ -197,13 +197,16 @@ def main():
     def prediction(model, infer_dataloader):
         predicted_sequences = []
         sources_sequences = []
+        ground_truths = []
         model.eval()
 
         for step, batch in enumerate(infer_dataloader):
             # TODO, add prompts, choosen, rejected
             # implementation, batch = {k: v.to(device) for k, v in batch.items()}
             sources_sequences += batch['sources']
+            ground_truths += batch['gts']
             del batch['sources']
+            del batch['gts']
             batch = to_device(batch, device)
             progress_bar.update(1)
             prompt_len = batch['input_ids'].shape[1]
@@ -239,7 +242,7 @@ def main():
             # if step > 20:
             #     break
 
-        return sources_sequences, predicted_sequences
+        return sources_sequences, predicted_sequences, ground_truths
 
     def save_inference_results(evaluation_result: dict, sources_sequences: list, predicted_sequences: list,
                                ground_truths: list):
@@ -251,7 +254,7 @@ def main():
 
     # Inference !
     print_rank_0("***** Start inference *****", args.local_rank)
-    sources_sequences, predicted_sequences = prediction(model, infer_dataloader)
+    sources_sequences, predicted_sequences, ground_truths = prediction(model, infer_dataloader)
 
     with open(args.data_path + "/test.json", "r", encoding="utf-8") as file:
         testset = json.load(file)
