@@ -95,6 +95,7 @@ class CL_Base_Model:
                 # Correct gradient accumulation steps are handled withing the deepspeed engine's backward call.
                 self.model.step()
 
+
             # Evaluate perplexity on the validation set.
             print_rank_0(
                 f"***** Evaluating perplexity, Epoch {epoch+1}/{epochs} *****",
@@ -115,7 +116,6 @@ class CL_Base_Model:
     def dist_results_gather(self, generate_ids, pad_token=-1):
         # (batch_size, seq_len)
         result = generate_ids  # Example tensor
-        device = torch.device("cuda", self.args.local_rank)
         local_batch_size = torch.tensor([result.size(0)], dtype=torch.int).cuda()
         local_seq_len = torch.tensor([result.size(1)], dtype=torch.int).cuda()
 
@@ -131,10 +131,10 @@ class CL_Base_Model:
         # left Pad 本地的 tensor 到 (_, max_seq_len)
         if result.size(1) < max_seq_len:
             pad_seq_len = (max_seq_len - result.size(1), 0)
-            result = F.pad(result, pad_seq_len, "constant", pad_token)
+            result = F.pad(result, pad_seq_len, "constant", pad_token).cuda()
 
         # 使用 all_gather 收集所有 GPUs 上的 padded tensors
-        total_results = [torch.zeros((int(bs.item()), max_seq_len), dtype=result.dtype, device=device) for bs in global_batch_sizes]
+        total_results = [torch.zeros((int(bs.item()), max_seq_len), dtype=result.dtype).cuda() for bs in global_batch_sizes]
         dist.all_gather(total_results, result)
 
         # Flatten total_results 来创建一个大的列表
@@ -167,7 +167,7 @@ class CL_Base_Model:
                                                    max_length=self.args.max_ans_len,
                                                    add_special_tokens=False,
                                                    padding='max_length',
-                                                   return_tensors='pt')
+                                                   return_tensors='pt')['input_ids'].to(device)
                 del batch['gts']
                 del batch['sources']
                 batch = to_device(batch, device)
