@@ -4,6 +4,9 @@ from utils.data.data_utils import create_prompt_dataset
 from utils.data.data_collator import DataCollator
 from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
 from tqdm import tqdm
+import torch
+import torch.distributed as dist
+import torch.nn.functional as F
 import json
 import os
 from evaluations import eval_ScienceQA, eval_MeetingBank, eval_PapyrusF, eval_CStance, eval_Py150, eval_FOMC, eval_NumGLUE_cm, eval_NumGLUE_ds # to be continued
@@ -108,7 +111,36 @@ class CL_Base_Model:
                 if infer_task_id > i_task:
                     break
                 self.evaluate(i_task, infer_task_id, _task)
-            
+
+    def dist_results_gather(self, generate_ids, pad_token):
+        # (batch_size, seq_len)
+        result = generate_ids  # Example tensor
+        device = torch.device("cuda", self.args.local_rank)
+        local_batch_size = torch.tensor([result.size(0)], dtype=torch.int).cuda()
+        local_seq_len = torch.tensor([result.size(1)], dtype=torch.int).cuda()
+
+        # 收集所有 GPUs 上的 batch_size 和 seq_len
+        global_batch_sizes = [torch.tensor([0], dtype=torch.int).cuda() for _ in range(dist.get_world_size())]
+        global_seq_len = [torch.tensor([0], dtype=torch.int).cuda() for _ in range(dist.get_world_size())]
+        dist.all_gather(global_batch_sizes, local_batch_size)
+        dist.all_gather(global_seq_len, local_seq_len)
+
+        # 确定 max_seq_len
+        max_seq_len = max([int(seq_len.item()) for seq_len in global_seq_len])
+
+        # left Pad 本地的 tensor 到 (_, max_seq_len)
+        if result.size(1) < max_seq_len:
+            pad_seq_len = (max_seq_len - result.size(1), 0)
+            result = F.pad(result, pad_seq_len, "constant", pad_token)
+
+        # 使用 all_gather 收集所有 GPUs 上的 padded tensors
+        total_results = [torch.zeros((int(bs.item()), max_seq_len), dtype=result.dtype, device=device) for bs in global_batch_sizes]
+        dist.all_gather(total_results, result)
+
+        # Flatten total_results 来创建一个大的列表
+        flat_results = torch.cat(total_results, dim=0)
+
+        return flat_results, max_seq_len
             
     def evaluate(self, round, infer_task_id, task):
         #评估，不同的dataset对应不同的metrics
@@ -129,12 +161,10 @@ class CL_Base_Model:
             model.eval()
 
             for step, batch in enumerate(infer_dataloader):
-
-                sources_sequences += batch['sources']
                 del batch['sources']
                 batch = to_device(batch, device)
                 progress_bar.update(1)
-                prompt_len = batch['input_ids'].shape[1]
+                # prompt_len = batch['input_ids'].shape[1]
 
                 # update progress bar
                 if self.args.global_rank == 0:
@@ -143,11 +173,6 @@ class CL_Base_Model:
                     progress_bar.set_description(description, refresh=False)
 
                 with torch.no_grad():
-                    # TODO, add more inference params
-                    # backbone config
-                    # generate_ids = model.generate(batch['input_ids'], max_new_tokens=args.max_ans_len,
-                    #                               pad_token_id=tokenizer.eos_token_id, attention_mask = batch['attention_mask'], temperature=0.7, do_sample=True, repetition_penalty=2.0 )
-
                     # sft config
                     generate_ids = model.generate(input_ids=batch['input_ids'],
                                                   attention_mask=batch['attention_mask'],
@@ -158,10 +183,15 @@ class CL_Base_Model:
                                                   generation_config=generation_config,
                                                   use_cache=False
                                                   )
+                    
+                # add for distributed 
+                gathered_ids, max_seq_len = self.dist_results_gather(generate_ids, self.tokenizer.eos_token_id)
 
-                sequences = self.tokenizer.batch_decode(generate_ids[:, prompt_len:], skip_special_tokens=True,
-                                                   clean_up_tokenization_spaces=False)
-                predicted_sequences += sequences
+                if self.args.global_rank <= 0:
+                    sou_sequences = self.tokenizer.batch_decode(gathered_ids[:, : max_seq_len], skip_special_tokens=True, clean_up_tokenization_spaces=False)
+                    pre_sequences = self.tokenizer.batch_decode(gathered_ids[:, max_seq_len:], skip_special_tokens=True, clean_up_tokenization_spaces=False)
+                    predicted_sequences += pre_sequences
+                    sources_sequences += sou_sequences
 
             return sources_sequences, predicted_sequences
 
@@ -185,33 +215,35 @@ class CL_Base_Model:
         with open(self.args.data_path + "/" + task + "/test.json", "r+", encoding="utf-8") as file:
             testset = json.load(file)
         ground_truths = []
+        
         for item in testset:
             ground_truths.append(item["answer"])
 
         # Get Accuracy/ROUGE/BLEU/...
         # The evaluation result is stored in a dictionary. e.g. {"accuracy": .., "rouge-L": ..}
-        if task == "ScienceQA":
-            evaluation_result = eval_ScienceQA.eval(predicted_sequences, ground_truths)
-        elif task == "MeetingBank":
-            evaluation_result = eval_MeetingBank.eval(predicted_sequences, ground_truths)
-        elif task == "C-STANCE":
-            evaluation_result = eval_CStance.eval(predicted_sequences, ground_truths)
-        elif task == "Papyrus-f":
-            evaluation_result = eval_PapyrusF.eval(predicted_sequences, ground_truths)
-        elif task == "Py150":
-            evaluation_result = eval_Py150.eval(predicted_sequences, ground_truths)
-        elif task == "FOMC":
-            evaluation_result = eval_FOMC.eval(predicted_sequences, ground_truths)
-        elif task == "NumGLUE-cm":
-            evaluation_result = eval_NumGLUE_cm.eval(predicted_sequences, ground_truths)
-        elif task == "NumGLUE-ds":
-            evaluation_result = eval_NumGLUE_ds.eval(predicted_sequences, ground_truths)
-        # elif task == "ToolBench":
-        #     evaluation_result = eval_ToolBench.eval(predicted_sequences, ground_truths)
-        else:
-            evaluation_result = {}
-
         if self.args.global_rank <= 0:
+            if task == "ScienceQA":
+                evaluation_result = eval_ScienceQA.eval(predicted_sequences, ground_truths)
+            elif task == "MeetingBank":
+                evaluation_result = eval_MeetingBank.eval(predicted_sequences, ground_truths)
+            elif task == "C-STANCE":
+                evaluation_result = eval_CStance.eval(predicted_sequences, ground_truths)
+            elif task == "Papyrus-f":
+                evaluation_result = eval_PapyrusF.eval(predicted_sequences, ground_truths)
+            elif task == "Py150":
+                evaluation_result = eval_Py150.eval(predicted_sequences, ground_truths)
+            elif task == "FOMC":
+                evaluation_result = eval_FOMC.eval(predicted_sequences, ground_truths)
+            elif task == "NumGLUE-cm":
+                evaluation_result = eval_NumGLUE_cm.eval(predicted_sequences, ground_truths)
+            elif task == "NumGLUE-ds":
+                evaluation_result = eval_NumGLUE_ds.eval(predicted_sequences, ground_truths)
+            # elif task == "ToolBench":
+            #     evaluation_result = eval_ToolBench.eval(predicted_sequences, ground_truths)
+            else:
+                evaluation_result = {}
+
+
             print("***** Saving inference results *****")
             save_inference_results(evaluation_result, sources_sequences, predicted_sequences, ground_truths, round, infer_task_id, task)
 
