@@ -35,3 +35,4 @@ quadprog
 peft
 rouge
 flash_attn
+qpth
