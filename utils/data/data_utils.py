@@ -282,7 +282,8 @@ def create_prompt_dataset(local_rank,
                           reload=False,
                           add_sys_prefix=False,
                           for_backbone=False,
-                          distributed=True):
+                          distributed=True,
+                          ):
     """
     Creates the prompt dataset
     """

@@ -74,13 +74,12 @@ def save_hf_format(model, tokenizer, args, sub_folder=""):
     output_model_file = os.path.join(output_dir, WEIGHTS_NAME)
     output_config_file = os.path.join(output_dir, CONFIG_NAME)
     save_dict = model_to_save.state_dict()
-    for key in list(save_dict.keys()):
-        if "lora" in key:
-            del save_dict[key]
+    # for key in list(save_dict.keys()):
+    #     if "lora" in key:
+    #         del save_dict[key]
     torch.save(save_dict, output_model_file)
     model_to_save.config.to_json_file(output_config_file)
     tokenizer.save_vocabulary(output_dir)
-
 
 def set_random_seed(seed):
     if seed is not None:
