@@ -291,6 +291,8 @@ def main():
         round=0
         while i<dem_num:
             round+=1
+            if round==10000:
+                break
             demonstration_id = random.randint(0,len(infer_dataset)-1)
             demonstration=infer_dataset[demonstration_id]  #[{prompt*4},{answer*4}]
             demonstration["prompt"] = demonstration["prompt"][len(TASK_PROMT[task]):]
@@ -303,8 +305,7 @@ def main():
             
             if len(demonstrations)==dem_num:
                 return demonstrations
-            if round==10000:
-                break
+
         return demonstrations
         
         
@@ -356,7 +357,7 @@ def main():
             )
         
         demonstrations = get_random_demonstrations(int(args.demonstrations_num), infer_dataset, args.max_prompt_len-len(tokenizer(TASK_PROMT[task]+Constrained_PROMPT)['input_ids']))
-        # print_rank_0("demonstrations length:{}".format(len(demonstrations)),args.global_rank)
+        print_rank_0("demonstrations length:{}".format(len(demonstrations)),args.global_rank)
         
         
         inf_data_collator = DataCollator(
