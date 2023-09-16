@@ -285,7 +285,8 @@ def main():
         
         replace_with_kernel_inject = False if "falcon" in args.model_name_or_path.lower() else True
         ds_engine = deepspeed.init_inference(model, mp_size=world_size, dtype=torch.bfloat16, checkpoint=None,
-                                            replace_with_kernel_inject=replace_with_kernel_inject)
+                                            replace_with_kernel_inject=replace_with_kernel_inject,
+                                            max_out_tokens=args.max_prompt_len + args.max_ans_len)
         model = ds_engine.module
 
         for infer_task_id in range(len(Datasets)):
