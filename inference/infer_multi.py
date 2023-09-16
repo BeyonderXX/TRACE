@@ -411,35 +411,35 @@ def main():
 
             progress_bar = tqdm(total=len(infer_dataloader), leave=True, disable=(args.global_rank != 0))
 
-            # # Inference !
-            # print_rank_0("***** Start inference *****", args.global_rank)
-            # sources_sequences, predicted_sequences, ground_truths = prediction(model, infer_dataloader)
+            # Inference !
+            print_rank_0("***** Start inference *****", args.global_rank)
+            sources_sequences, predicted_sequences, ground_truths = prediction(model, infer_dataloader)
 
-            # # Get Accuracy/ROUGE/BLEU/...
-            # # The evaluation result is stored in a dictionary. e.g. {"accuracy": .., "rouge-L": ..}
-            # if args.global_rank <= 0:
+            # Get Accuracy/ROUGE/BLEU/...
+            # The evaluation result is stored in a dictionary. e.g. {"accuracy": .., "rouge-L": ..}
+            if args.global_rank <= 0:
 
-            #     if dataset == "ScienceQA":
-            #         evaluation_result = eval_ScienceQA.eval(predicted_sequences, ground_truths)
-            #     elif dataset == "MeetingBank":
-            #         evaluation_result = eval_MeetingBank.eval(predicted_sequences, ground_truths)
-            #     elif dataset == "C-STANCE":
-            #         evaluation_result = eval_CStance.eval(predicted_sequences, ground_truths)
-            #     elif dataset == "Papyrus-f":
-            #         evaluation_result = eval_PapyrusF.eval(predicted_sequences, ground_truths)
-            #     elif dataset == "Py150":
-            #         evaluation_result = eval_Py150.eval(predicted_sequences, ground_truths)
-            #     elif dataset == "FOMC":
-            #         evaluation_result = eval_FOMC.eval(predicted_sequences, ground_truths)
-            #     elif dataset == "NumGLUE-cm":
-            #         evaluation_result = eval_NumGLUE_cm.eval(predicted_sequences, ground_truths)
-            #     elif dataset == "NumGLUE-ds":
-            #         evaluation_result = eval_NumGLUE_ds.eval(predicted_sequences, ground_truths)
-            #     else:
-            #         evaluation_result = {}
+                if dataset == "ScienceQA":
+                    evaluation_result = eval_ScienceQA.eval(predicted_sequences, ground_truths)
+                elif dataset == "MeetingBank":
+                    evaluation_result = eval_MeetingBank.eval(predicted_sequences, ground_truths)
+                elif dataset == "C-STANCE":
+                    evaluation_result = eval_CStance.eval(predicted_sequences, ground_truths)
+                elif dataset == "Papyrus-f":
+                    evaluation_result = eval_PapyrusF.eval(predicted_sequences, ground_truths)
+                elif dataset == "Py150":
+                    evaluation_result = eval_Py150.eval(predicted_sequences, ground_truths)
+                elif dataset == "FOMC":
+                    evaluation_result = eval_FOMC.eval(predicted_sequences, ground_truths)
+                elif dataset == "NumGLUE-cm":
+                    evaluation_result = eval_NumGLUE_cm.eval(predicted_sequences, ground_truths)
+                elif dataset == "NumGLUE-ds":
+                    evaluation_result = eval_NumGLUE_ds.eval(predicted_sequences, ground_truths)
+                else:
+                    evaluation_result = {}
 
-            #     print("***** Saving inference results *****")
-            #     save_inference_results(evaluation_result, sources_sequences, predicted_sequences, ground_truths, round, infer_task_id, dataset)
+                print("***** Saving inference results *****")
+                save_inference_results(evaluation_result, sources_sequences, predicted_sequences, ground_truths, round, infer_task_id, dataset)
 
 if __name__ == "__main__":
     main()
