@@ -10,5 +10,5 @@ deepspeed --include=localhost:0,1,2,3,4,5,6,7 --master_port $port inference/infe
     --max_ans_len 512 \
     --seed 1234 \
     --deepspeed \
-    "--CL_method","OGD" \
+    --CL_method OGD \
     --inference_output_path /workspace/output/llama-7b-chat-inference
