@@ -288,84 +288,84 @@ def main():
         
     dataset_len = len(Datasets)
     
-    tokenizer = load_hf_tokenizer(args.model_name_or_path, fast_tokenizer=True)
-
-    # default the LLM is decoder only model, so padding side is left
-    assert tokenizer.padding_side == 'left'
-    assert tokenizer.truncation_side == "left"
-
-    model = create_hf_model(AutoModelForCausalLM,
-                            args.model_name_or_path,
-                            tokenizer,
-                            ds_config=None,
-                            )
-    if args.CL_method == "LFPT5":
-        from utils.my_peft import get_peft_model, PromptTuningInit, PromptTuningConfig, LoraConfig, TaskType
-
-        initial_prompt = getInitialPrompt(tokenizer, prompt_token_number=300)
-        peft_config = PromptTuningConfig(
-            task_type=TaskType.CAUSAL_LM,
-            prompt_tuning_init=PromptTuningInit.TEXT,
-            num_virtual_tokens=300,
-            prompt_tuning_init_text=initial_prompt,
-            tokenizer_name_or_path=args.model_name_or_path,
-        )
-        model = get_peft_model(model, peft_config)
-
-    if args.CL_method == "O-LoRA":
-        from utils.my_peft import get_peft_model, PromptTuningInit, PromptTuningConfig, LoraConfig, TaskType
-
-        peft_config = LoraConfig(
-            task_type=TaskType.CAUSAL_LM, r=8, lora_alpha=32, lora_dropout=0.1
-        )
-        model = get_peft_model(model, peft_config)
-        for name, param in model.named_parameters():
-            if name.find("loranew_") != -1:
-                param.requires_grad = True
-            elif name.find("lora_") != -1:
-                param.requires_grad = False
-                
-    if args.CL_method == "OGD":
-        from peft import get_peft_model, LoraConfig, TaskType
-        
-        peft_config = LoraConfig(
-            task_type=TaskType.CAUSAL_LM, r=8, lora_alpha=32, lora_dropout=0.1
-        )
-        model = get_peft_model(model, peft_config)
-        for name, param in model.named_parameters():
-            if name.find("lora") != -1:
-                param.requires_grad = True
-                
-    if args.CL_method=="PP" or args.CL_method=="L2P":
-        if "opt" in args.model_name_or_path.lower():
-            embed_tokens_shape = model.model.decoder.embed_tokens.weight.shape
-            embed_tokens = model.model.decoder.embed_tokens
-            
-            args.embed_tokens_dim = embed_tokens_shape[1]
-            args.embed_tokens_length = embed_tokens_shape[0]
-            args.embed_tokens = embed_tokens
-        elif "llama" in args.model_name_or_path.lower():
-            embed_tokens_shape = model.model.embed_tokens.weight.shape
-            embed_tokens = model.model.embed_tokens
-            
-            args.embed_tokens_dim = embed_tokens_shape[1]
-            args.embed_tokens_length = embed_tokens_shape[0]
-            args.embed_tokens = embed_tokens
-            
-        if args.CL_method=="PP":
-            args.prefix_len = 20
-            model = convert_PP_model(model, args)
-            
-        elif args.CL_method=="L2P":
-            args.pool_size = 10
-            args.prompt_length = 5
-            args.prompt_init = "uniform"
-            model = convert_L2P_model(model, args)
-            for name, params in model.named_parameters():
-                if "prompt" not in name:
-                    params.requires_grad=False
 
     for round in range(dataset_len):
+        tokenizer = load_hf_tokenizer(args.model_name_or_path, fast_tokenizer=True)
+
+        # default the LLM is decoder only model, so padding side is left
+        assert tokenizer.padding_side == 'left'
+        assert tokenizer.truncation_side == "left"
+
+        model = create_hf_model(AutoModelForCausalLM,
+                                args.model_name_or_path,
+                                tokenizer,
+                                ds_config=None,
+                                )
+        if args.CL_method == "LFPT5":
+            from utils.my_peft import get_peft_model, PromptTuningInit, PromptTuningConfig, LoraConfig, TaskType
+
+            initial_prompt = getInitialPrompt(tokenizer, prompt_token_number=300)
+            peft_config = PromptTuningConfig(
+                task_type=TaskType.CAUSAL_LM,
+                prompt_tuning_init=PromptTuningInit.TEXT,
+                num_virtual_tokens=300,
+                prompt_tuning_init_text=initial_prompt,
+                tokenizer_name_or_path=args.model_name_or_path,
+            )
+            model = get_peft_model(model, peft_config)
+
+        if args.CL_method == "O-LoRA":
+            from utils.my_peft import get_peft_model, PromptTuningInit, PromptTuningConfig, LoraConfig, TaskType
+
+            peft_config = LoraConfig(
+                task_type=TaskType.CAUSAL_LM, r=8, lora_alpha=32, lora_dropout=0.1
+            )
+            model = get_peft_model(model, peft_config)
+            for name, param in model.named_parameters():
+                if name.find("loranew_") != -1:
+                    param.requires_grad = True
+                elif name.find("lora_") != -1:
+                    param.requires_grad = False
+                    
+        if args.CL_method == "OGD":
+            from peft import get_peft_model, LoraConfig, TaskType
+            
+            peft_config = LoraConfig(
+                task_type=TaskType.CAUSAL_LM, r=8, lora_alpha=32, lora_dropout=0.1
+            )
+            model = get_peft_model(model, peft_config)
+            for name, param in model.named_parameters():
+                if name.find("lora") != -1:
+                    param.requires_grad = True
+                    
+        if args.CL_method=="PP" or args.CL_method=="L2P":
+            if "opt" in args.model_name_or_path.lower():
+                embed_tokens_shape = model.model.decoder.embed_tokens.weight.shape
+                embed_tokens = model.model.decoder.embed_tokens
+                
+                args.embed_tokens_dim = embed_tokens_shape[1]
+                args.embed_tokens_length = embed_tokens_shape[0]
+                args.embed_tokens = embed_tokens
+            elif "llama" in args.model_name_or_path.lower():
+                embed_tokens_shape = model.model.embed_tokens.weight.shape
+                embed_tokens = model.model.embed_tokens
+                
+                args.embed_tokens_dim = embed_tokens_shape[1]
+                args.embed_tokens_length = embed_tokens_shape[0]
+                args.embed_tokens = embed_tokens
+                
+            if args.CL_method=="PP":
+                args.prefix_len = 20
+                model = convert_PP_model(model, args)
+                
+            elif args.CL_method=="L2P":
+                args.pool_size = 10
+                args.prompt_length = 5
+                args.prompt_init = "uniform"
+                model = convert_L2P_model(model, args)
+                for name, params in model.named_parameters():
+                    if "prompt" not in name:
+                        params.requires_grad=False
         inference_model_path = os.path.join(args.inference_model_path,str(round))
 
         
@@ -411,35 +411,35 @@ def main():
 
             progress_bar = tqdm(total=len(infer_dataloader), leave=True, disable=(args.global_rank != 0))
 
-            # Inference !
-            print_rank_0("***** Start inference *****", args.global_rank)
-            sources_sequences, predicted_sequences, ground_truths = prediction(model, infer_dataloader)
+            # # Inference !
+            # print_rank_0("***** Start inference *****", args.global_rank)
+            # sources_sequences, predicted_sequences, ground_truths = prediction(model, infer_dataloader)
 
-            # Get Accuracy/ROUGE/BLEU/...
-            # The evaluation result is stored in a dictionary. e.g. {"accuracy": .., "rouge-L": ..}
-            if args.global_rank <= 0:
+            # # Get Accuracy/ROUGE/BLEU/...
+            # # The evaluation result is stored in a dictionary. e.g. {"accuracy": .., "rouge-L": ..}
+            # if args.global_rank <= 0:
 
-                if dataset == "ScienceQA":
-                    evaluation_result = eval_ScienceQA.eval(predicted_sequences, ground_truths)
-                elif dataset == "MeetingBank":
-                    evaluation_result = eval_MeetingBank.eval(predicted_sequences, ground_truths)
-                elif dataset == "C-STANCE":
-                    evaluation_result = eval_CStance.eval(predicted_sequences, ground_truths)
-                elif dataset == "Papyrus-f":
-                    evaluation_result = eval_PapyrusF.eval(predicted_sequences, ground_truths)
-                elif dataset == "Py150":
-                    evaluation_result = eval_Py150.eval(predicted_sequences, ground_truths)
-                elif dataset == "FOMC":
-                    evaluation_result = eval_FOMC.eval(predicted_sequences, ground_truths)
-                elif dataset == "NumGLUE-cm":
-                    evaluation_result = eval_NumGLUE_cm.eval(predicted_sequences, ground_truths)
-                elif dataset == "NumGLUE-ds":
-                    evaluation_result = eval_NumGLUE_ds.eval(predicted_sequences, ground_truths)
-                else:
-                    evaluation_result = {}
+            #     if dataset == "ScienceQA":
+            #         evaluation_result = eval_ScienceQA.eval(predicted_sequences, ground_truths)
+            #     elif dataset == "MeetingBank":
+            #         evaluation_result = eval_MeetingBank.eval(predicted_sequences, ground_truths)
+            #     elif dataset == "C-STANCE":
+            #         evaluation_result = eval_CStance.eval(predicted_sequences, ground_truths)
+            #     elif dataset == "Papyrus-f":
+            #         evaluation_result = eval_PapyrusF.eval(predicted_sequences, ground_truths)
+            #     elif dataset == "Py150":
+            #         evaluation_result = eval_Py150.eval(predicted_sequences, ground_truths)
+            #     elif dataset == "FOMC":
+            #         evaluation_result = eval_FOMC.eval(predicted_sequences, ground_truths)
+            #     elif dataset == "NumGLUE-cm":
+            #         evaluation_result = eval_NumGLUE_cm.eval(predicted_sequences, ground_truths)
+            #     elif dataset == "NumGLUE-ds":
+            #         evaluation_result = eval_NumGLUE_ds.eval(predicted_sequences, ground_truths)
+            #     else:
+            #         evaluation_result = {}
 
-                print("***** Saving inference results *****")
-                save_inference_results(evaluation_result, sources_sequences, predicted_sequences, ground_truths, round, infer_task_id, dataset)
+            #     print("***** Saving inference results *****")
+            #     save_inference_results(evaluation_result, sources_sequences, predicted_sequences, ground_truths, round, infer_task_id, dataset)
 
 if __name__ == "__main__":
     main()
