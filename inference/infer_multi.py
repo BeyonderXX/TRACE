@@ -49,8 +49,19 @@ from utils.model.model_utils import create_hf_model
 from evaluations import eval_ScienceQA, eval_MeetingBank, eval_PapyrusF, eval_CStance, eval_Py150, eval_FOMC, eval_NumGLUE_cm, eval_NumGLUE_ds # to be continued
 from training.params import Method2Class, AllDatasetName
 
+from model.Replay.LFPT5 import getInitialPrompt
+from model.Dynamic_network.PP import PP, convert_PP_model
+from model.Dynamic_network.L2P import convert_L2P_model
+
 
 # dist.init_process_group(backend='nccl')
+
+# # add flash attention
+# from utils.flash_attention.llama_flash_att import replace_llama_attn_with_flash_attn
+# from utils.flash_attention.bloom_flash_att import replace_bloom_attn_with_flash_attn
+
+# replace_llama_attn_with_flash_attn()
+# replace_bloom_attn_with_flash_attn()
 
 
 def parse_args():
@@ -79,6 +90,13 @@ def parse_args():
         type=str,
         help=
         "Path to pretrained model or model identifier from huggingface.co/models.",
+        required=True,
+    )
+    parser.add_argument(
+        "--inference_model_path",
+        type=str,
+        help=
+        "Path to inference model.",
         required=True,
     )
 
@@ -129,6 +147,9 @@ def parse_args():
                         type=str,
                         default=None,
                         help="Where to store inference results.")
+    parser.add_argument('--CL_method',
+            default=None,
+            help='continual learning method used')
 
     parser = deepspeed.add_config_arguments(parser)
     args = parser.parse_args()
@@ -214,7 +235,6 @@ def main():
             del batch['gts']
             del batch['sources']
             batch = to_device(batch, device)
-            progress_bar.update(1)
             # prompt_len = batch['input_ids'].shape[1]
 
             # update progress bar
@@ -267,21 +287,93 @@ def main():
         Datasets = args.dataset_name
         
     dataset_len = len(Datasets)
+    
+    tokenizer = load_hf_tokenizer(args.model_name_or_path, fast_tokenizer=True)
+
+    # default the LLM is decoder only model, so padding side is left
+    assert tokenizer.padding_side == 'left'
+    assert tokenizer.truncation_side == "left"
+
+    model = create_hf_model(AutoModelForCausalLM,
+                            args.model_name_or_path,
+                            tokenizer,
+                            ds_config=None,
+                            )
+    if args.CL_method == "LFPT5":
+        from utils.my_peft import get_peft_model, PromptTuningInit, PromptTuningConfig, LoraConfig, TaskType
+
+        initial_prompt = getInitialPrompt(tokenizer, prompt_token_number=300)
+        peft_config = PromptTuningConfig(
+            task_type=TaskType.CAUSAL_LM,
+            prompt_tuning_init=PromptTuningInit.TEXT,
+            num_virtual_tokens=300,
+            prompt_tuning_init_text=initial_prompt,
+            tokenizer_name_or_path=args.model_name_or_path,
+        )
+        model = get_peft_model(model, peft_config)
+
+    if args.CL_method == "O-LoRA":
+        from utils.my_peft import get_peft_model, PromptTuningInit, PromptTuningConfig, LoraConfig, TaskType
+
+        peft_config = LoraConfig(
+            task_type=TaskType.CAUSAL_LM, r=8, lora_alpha=32, lora_dropout=0.1
+        )
+        model = get_peft_model(model, peft_config)
+        for name, param in model.named_parameters():
+            if name.find("loranew_") != -1:
+                param.requires_grad = True
+            elif name.find("lora_") != -1:
+                param.requires_grad = False
+                
+    if args.CL_method == "OGD":
+        from peft import get_peft_model, LoraConfig, TaskType
+        
+        peft_config = LoraConfig(
+            task_type=TaskType.CAUSAL_LM, r=8, lora_alpha=32, lora_dropout=0.1
+        )
+        model = get_peft_model(model, peft_config)
+        for name, param in model.named_parameters():
+            if name.find("lora") != -1:
+                param.requires_grad = True
+                
+    if args.CL_method=="PP" or args.CL_method=="L2P":
+        if "opt" in args.model_name_or_path.lower():
+            embed_tokens_shape = model.model.decoder.embed_tokens.weight.shape
+            embed_tokens = model.model.decoder.embed_tokens
+            
+            args.embed_tokens_dim = embed_tokens_shape[1]
+            args.embed_tokens_length = embed_tokens_shape[0]
+            args.embed_tokens = embed_tokens
+        elif "llama" in args.model_name_or_path.lower():
+            embed_tokens_shape = model.model.embed_tokens.weight.shape
+            embed_tokens = model.model.embed_tokens
+            
+            args.embed_tokens_dim = embed_tokens_shape[1]
+            args.embed_tokens_length = embed_tokens_shape[0]
+            args.embed_tokens = embed_tokens
+            
+        if args.CL_method=="PP":
+            args.prefix_len = 20
+            model = convert_PP_model(model, args)
+            
+        elif args.CL_method=="L2P":
+            args.pool_size = 10
+            args.prompt_length = 5
+            args.prompt_init = "uniform"
+            model = convert_L2P_model(model, args)
+            for name, params in model.named_parameters():
+                if "prompt" not in name:
+                    params.requires_grad=False
 
     for round in range(dataset_len):
-        # model_path = os.path.join(args.model_name_or_path,str(round))
-        model_path = args.model_name_or_path
-        tokenizer = load_hf_tokenizer(model_path, fast_tokenizer=True)
+        inference_model_path = os.path.join(args.inference_model_path,str(round))
 
-        # default the LLM is decoder only model, so padding side is left
-        assert tokenizer.padding_side == 'left'
-        assert tokenizer.truncation_side == "left"
-    
-        model = create_hf_model(AutoModelForCausalLM,
-                                model_path,
-                                tokenizer,
-                                ds_config=None,
-                                )
+        
+        inference_model = torch.load(os.path.join(inference_model_path, "pytorch_model.bin"))
+        for name, param in model.named_parameters():
+            param.data.copy_(inference_model[name])
+        del inference_model
+        
         
         replace_with_kernel_inject = False if "falcon" in args.model_name_or_path.lower() else True
         ds_engine = deepspeed.init_inference(model, mp_size=world_size, dtype=torch.bfloat16, checkpoint=None,
@@ -289,7 +381,7 @@ def main():
                                             max_out_tokens=args.max_prompt_len + args.max_ans_len)
         model = ds_engine.module
 
-        for infer_task_id in range(len(Datasets)):
+        for infer_task_id in range(round+1):
             dataset = Datasets[infer_task_id]
             dataset_path = os.path.join(args.data_path,dataset)
 
@@ -331,7 +423,7 @@ def main():
                     evaluation_result = eval_ScienceQA.eval(predicted_sequences, ground_truths)
                 elif dataset == "MeetingBank":
                     evaluation_result = eval_MeetingBank.eval(predicted_sequences, ground_truths)
-                elif dataset == "C-Stance":
+                elif dataset == "C-STANCE":
                     evaluation_result = eval_CStance.eval(predicted_sequences, ground_truths)
                 elif dataset == "Papyrus-f":
                     evaluation_result = eval_PapyrusF.eval(predicted_sequences, ground_truths)

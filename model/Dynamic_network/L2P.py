@@ -124,7 +124,7 @@ class L2P(CL_Base_Model):
         prefix_length = batched_prompt.shape[1]
         attn_masks = torch.concat((torch.tensor(1).to("cuda").repeat(batch_size,prefix_length),attn_masks), axis=1)
         labels = torch.concat((labels[0][0].repeat(batch_size,inputs_embeds.shape[1]-labels.shape[1]),labels),axis=1)
-        outputs = self.model(inputs_embeds=inputs_embeds, labels=labels, attention_mask=attn_masks)
+        outputs = self.model(inputs_embeds=inputs_embeds, labels=labels, attention_mask=attn_masks, use_cache=False)
         loss = outputs[0]
         
         batched_key_norm = prompt_norm[idx]

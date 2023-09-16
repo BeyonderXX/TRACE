@@ -17,7 +17,7 @@ class EWC(CL_Base_Model):
         self._previous_params = {}
 
         for n, p in deepcopy(self.params).items():
-            self._previous_params[n] = p.data # Previous task parameters
+            self._previous_params[n] = p.data.cpu() # Previous task parameters
         self.grads = {} # 存储节点名称与节点的grad
         
         self.fisher = {}
@@ -34,7 +34,7 @@ class EWC(CL_Base_Model):
     def _update_fisher(self):
         for n, p in self.model.named_parameters():
             if n in self.grads.keys():
-                self.fisher[n].data += self.grads[n].data ** 2
+                self.fisher[n].data += self.grads[n].cuda().data ** 2
     #正则化，除以训练集长度
     def _regular_fisher(self):
         for n, p in self.model.named_parameters():
@@ -44,14 +44,14 @@ class EWC(CL_Base_Model):
     
     def _update_previous_params(self):
         for n, p in self.model.named_parameters():
-            self._previous_params[n] = p.data # Previous task parameters
+            self._previous_params[n] = p.data.cpu() # Previous task parameters
 
     #计算惩罚loss
     def penalty(self):
         restrict_loss = 0
         precision_matrices = self.fisher
         for n, p in self.model.named_parameters():
-            restrict_loss_params = precision_matrices[n] * (p - self._previous_params[n]) ** 2
+            restrict_loss_params = precision_matrices[n] * (p - self._previous_params[n].cuda()) ** 2
             restrict_loss += restrict_loss_params.sum()
         return restrict_loss
     
@@ -65,7 +65,7 @@ class EWC(CL_Base_Model):
         # inputs_embeds = model.encoder.embed_tokens(batch["source_ids"])
         # inputs_embeds = self.model.model.embed_tokens(batch["input_ids"])  #向量，【batch * embedding_size】
 
-        outputs = self.model(input_ids=batch['input_ids'], labels=lm_labels, attention_mask=batch['attention_mask'])
+        outputs = self.model(input_ids=batch['input_ids'], labels=lm_labels, attention_mask=batch['attention_mask'],use_cache=False)
         
         loss = outputs[0]
         if self.task_num!=0:
@@ -78,7 +78,7 @@ class EWC(CL_Base_Model):
         def hook(grad):
             grad = torch.nan_to_num(grad, nan=0)
             # grad = torch.clamp(grad, -self.args.ds_config['gradient_clipping'], self.args.ds_config['gradient_clipping'])
-            self.grads[name] = grad
+            self.grads[name] = grad.cpu()
         return hook
     def retain_grad(self):
         for n,p in self.model.named_parameters():
@@ -128,10 +128,7 @@ class EWC(CL_Base_Model):
             self._regular_fisher()  
             
             self._update_previous_params()
-            for infer_task_id, _task in enumerate(self.train_task_list):
-                if infer_task_id > i_task:
-                    break
-                self.evaluate(i_task, infer_task_id, _task)
+            self.save_model(i_task)
             
             
 

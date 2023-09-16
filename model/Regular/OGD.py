@@ -92,7 +92,7 @@ class OGD(CL_Base_Model):
                     batch):
 
         lm_labels = batch["labels"]
-        outputs = self.model(input_ids=batch['input_ids'], labels=lm_labels, attention_mask=batch['attention_mask'])
+        outputs = self.model(input_ids=batch['input_ids'], labels=lm_labels, attention_mask=batch['attention_mask'],use_cache=False)
         loss = outputs[0]
 
         return loss
@@ -170,7 +170,9 @@ class OGD(CL_Base_Model):
                 params.register_hook(lambda grads: self.project_vec(grads))
         for i_task, task in enumerate(self.train_task_list):
             self.train_one_task(task, i_task, self.args.num_train_epochs)
-            for j_task, _task in enumerate(self.train_task_list):
-                if j_task > i_task:
-                    break
-                self.evaluate(i_task, j_task, _task)
+            self.save_model(i_task)
+
+            # for j_task, _task in enumerate(self.train_task_list):
+            #     if j_task > i_task:
+            #         break
+            #     self.evaluate(i_task, j_task, _task)

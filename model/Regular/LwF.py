@@ -18,7 +18,7 @@ class LwF(CL_Base_Model):
                     batch):
 
         lm_labels = batch["labels"]
-        outputs = self.model(input_ids=batch['input_ids'], labels=lm_labels, attention_mask=batch['attention_mask'])
+        outputs = self.model(input_ids=batch['input_ids'], labels=lm_labels, attention_mask=batch['attention_mask'],use_cache=False)
         return outputs
     
     

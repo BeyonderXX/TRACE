@@ -155,7 +155,7 @@ class MbPAplusplus(CL_Base_Model):
                         attn_masks = S_attn_masks[i].unsqueeze(0).to("cuda")
                         labels = S_labels[i].unsqueeze(0).to("cuda")
 
-                        outputs = self.model(input_ids=input_ids, labels=labels, attention_mask=attn_masks)
+                        outputs = self.model(input_ids=input_ids, labels=labels, attention_mask=attn_masks, use_cache=False)
                         loss = outputs.loss
                         # Backward pass
                         self.model.backward(loss)
@@ -168,7 +168,7 @@ class MbPAplusplus(CL_Base_Model):
                 # Unpacking the batch items
                 batch = {k:batch[k].to('cuda') for k in batch}
                 
-                outputs = self.model(input_ids=batch['input_ids'], labels=batch['labels'], attention_mask=batch['attention_mask'], output_hidden_states=True)
+                outputs = self.model(input_ids=batch['input_ids'], labels=batch['labels'], attention_mask=batch['attention_mask'], output_hidden_states=True, use_cache=False)
                 loss = outputs.loss
                 # Backward pass
                 if self.args.global_rank == 0:
@@ -196,7 +196,7 @@ class MbPAplusplus(CL_Base_Model):
         for _ in range(self.L):
             for i in range(len(R_input_ids)):
                 
-                R_outputs = self.model(input_ids=R_input_ids[i].unsqueeze(0), attention_mask=R_attn_masks[i].unsqueeze(0), labels=R_labels[i].unsqueeze(0))
+                R_outputs = self.model(input_ids=R_input_ids[i].unsqueeze(0), attention_mask=R_attn_masks[i].unsqueeze(0), labels=R_labels[i].unsqueeze(0), use_cache=False)
                 R_loss = R_outputs.loss
                 # Initialize diff_loss to zero and place it on the appropriate device
                 diff_loss = torch.Tensor([0]).to(
