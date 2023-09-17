@@ -240,11 +240,17 @@ class PromptDataset(Dataset):
         }
 
 # 根据传入的sampls，调用dataset object，获取数据想要的部分,tokenize
-def get_prompt_dataset(current_dataset, raw_dataset, add_sys_prefix=False):
+def get_prompt_dataset(current_dataset, raw_dataset, add_sys_prefix=False, sample_ratio=None):
     prompt_dataset = []
     answer_dataset = []
+    if sample_ratio!=None:
+        sample_length = int(len(current_dataset) * sample_ratio)
+    else:
+        sample_length = len(current_dataset)
 
     for i, tmp_data in enumerate(current_dataset):
+        if i==sample_length:
+            break
         prompt_sentence = raw_dataset.get_prompt(tmp_data)  # the accept response
         if add_sys_prefix:
             prompt_sentence = f"{B_SYS}{DEFAULT_SYSTEM_PROMPT}{E_SYS}{prompt_sentence}"
@@ -252,18 +258,19 @@ def get_prompt_dataset(current_dataset, raw_dataset, add_sys_prefix=False):
 
         prompt_dataset.append(prompt_sentence)
         answer_dataset.append(answer_sentence)
+        
 
     return PromptDataset(prompt_dataset, answer_dataset)
 
 
 # step 2
 def create_dataset(local_rank, dataset_name, output_path,
-                   seed, add_sys_prefix=False, for_backbone=False):
+                   seed, add_sys_prefix=False, for_backbone=False, sample_ratio=None):
     # 加载数据集，用datasets接口加载好返回，此外做了train,eval,test分片
     raw_dataset = get_raw_dataset(dataset_name, output_path, seed, local_rank, for_backbone=for_backbone)
 
     train_dataset = raw_dataset.get_train_data()
-    train_dataset = get_prompt_dataset(train_dataset, raw_dataset, add_sys_prefix=add_sys_prefix)
+    train_dataset = get_prompt_dataset(train_dataset, raw_dataset, add_sys_prefix=add_sys_prefix, sample_ratio=sample_ratio)
 
     eval_dataset = raw_dataset.get_eval_data()
     eval_dataset = get_prompt_dataset(eval_dataset, raw_dataset, add_sys_prefix=add_sys_prefix)
@@ -283,6 +290,7 @@ def create_prompt_dataset(local_rank,
                           add_sys_prefix=False,
                           for_backbone=False,
                           distributed=True,
+                          sample_ratio=None
                           ):
     """
     Creates the prompt dataset
@@ -308,7 +316,7 @@ def create_prompt_dataset(local_rank,
     if local_rank <= 0:
         train_dataset, eval_dataset, test_dataset = create_dataset(
             local_rank, data_path, output_path,
-            seed, add_sys_prefix=add_sys_prefix, for_backbone=for_backbone)
+            seed, add_sys_prefix=add_sys_prefix, for_backbone=for_backbone, sample_ratio=sample_ratio)
 
         # torch.save的数据格式可以是任意的
         # 提前准备好，可以加速预处理，torch.load 速度也会比较快
