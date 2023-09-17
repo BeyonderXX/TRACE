@@ -37,7 +37,7 @@ from training.params import Method2Class, AllDatasetName
 from evaluations import eval_ScienceQA, eval_MeetingBank, eval_PapyrusF, eval_CStance, eval_Py150, eval_FOMC, eval_NumGLUE_cm, eval_NumGLUE_ds # to be continued
 
 
-os.environ['CUDA_VISIBLE_DEVICES']="0"
+# os.environ['CUDA_VISIBLE_DEVICES']="0"
 
 
 Constrained_PROMPT = "Following the above examples to accomplish the task without generate extra examples.\n"
