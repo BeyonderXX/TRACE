@@ -485,7 +485,7 @@ def main():
 
 
     for i_task, task in enumerate(train_task_list):
-        # train_one_task(task, i_task, args.num_train_epochs)
+        train_one_task(task, i_task, args.num_train_epochs)
         replay(i_task, args.num_train_epochs)
         save_model(i_task)
         # CL_Trainer.save_model()
