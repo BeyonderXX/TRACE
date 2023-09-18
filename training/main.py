@@ -41,11 +41,11 @@ from utils.module.lora import convert_linear_layer_to_lora, convert_lora_to_line
 from utils.model.model_utils import create_hf_model
 
 # add flash attention
-# from utils.flash_attention.llama_flash_att import replace_llama_attn_with_flash_attn
-# from utils.flash_attention.bloom_flash_att import replace_bloom_attn_with_flash_attn
+from utils.flash_attention.llama_flash_att import replace_llama_attn_with_flash_attn
+from utils.flash_attention.bloom_flash_att import replace_bloom_attn_with_flash_attn
 
-# replace_llama_attn_with_flash_attn()
-# replace_bloom_attn_with_flash_attn()
+replace_llama_attn_with_flash_attn()
+replace_bloom_attn_with_flash_attn()
 
 # my_peft中修改了lora相关的逻辑
 from model.Replay.LFPT5 import getInitialPrompt
