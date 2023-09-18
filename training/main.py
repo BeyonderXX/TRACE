@@ -23,6 +23,7 @@ from transformers import (
     SchedulerType,
     default_data_collator,
     get_scheduler,
+    get_constant_schedule_with_warmup
 )
 
 import deepspeed
@@ -40,11 +41,11 @@ from utils.module.lora import convert_linear_layer_to_lora, convert_lora_to_line
 from utils.model.model_utils import create_hf_model
 
 # add flash attention
-from utils.flash_attention.llama_flash_att import replace_llama_attn_with_flash_attn
-from utils.flash_attention.bloom_flash_att import replace_bloom_attn_with_flash_attn
+# from utils.flash_attention.llama_flash_att import replace_llama_attn_with_flash_attn
+# from utils.flash_attention.bloom_flash_att import replace_bloom_attn_with_flash_attn
 
-replace_llama_attn_with_flash_attn()
-replace_bloom_attn_with_flash_attn()
+# replace_llama_attn_with_flash_attn()
+# replace_bloom_attn_with_flash_attn()
 
 # my_peft中修改了lora相关的逻辑
 from model.Replay.LFPT5 import getInitialPrompt
@@ -281,9 +282,6 @@ def main():
         for name, param in model.named_parameters():
             if name.find("lora") != -1:
                 param.requires_grad = True
-
-        
-        
     
     train_task_list = {}
     eval_task_list = {}
@@ -389,11 +387,9 @@ def main():
         total_train_dataloader_len = sum(len(train_task_list[task]) for task in list(train_task_list.keys()))
         num_update_steps_per_epoch = math.ceil(
             total_train_dataloader_len / args.gradient_accumulation_steps)
-        lr_scheduler = get_scheduler(
-            name=args.lr_scheduler_type,
+        lr_scheduler = get_constant_schedule_with_warmup(
             optimizer=optimizer,
-            num_warmup_steps=args.num_warmup_steps,
-            num_training_steps=args.num_train_epochs * num_update_steps_per_epoch,
+            num_warmup_steps=args.num_warmup_steps
         )
         
         return optimizer, lr_scheduler
@@ -453,65 +449,6 @@ def main():
     if args.CL_method in Method2Class.keys():
         CL_Trainer = Method2Class[args.CL_method](model, tokenizer, optimizer, train_task_list, eval_task_list, test_task_list, args)
         CL_Trainer.train_continual()
-        
-    else:
-        #### Train ####
-        total_steps = args.num_train_epochs * len(train_dataloader)
-        progress_bar = tqdm(total=total_steps, leave=True, disable=(args.global_rank != 0))
-
-        for epoch in range(args.num_train_epochs):
-            print_rank_0(
-                f"Beginning of Epoch {epoch+1}/{args.num_train_epochs}, Total Micro Batches {len(train_dataloader)}",
-                args.global_rank)
-            model.train()
-
-            for step, batch in enumerate(train_dataloader):
-                del batch['sources']
-                batch = to_device(batch, device)
-                outputs = model(**batch, use_cache=False)
-                loss = outputs.loss
-
-                # Update the description to include current step and loss, if needed
-                if args.global_rank == 0:
-                    # Update the progress bar
-                    progress_bar.update(1)
-                    description = f"Epoch {epoch+1}, Step {step}, Loss: {loss.item():.4f}"
-                    progress_bar.set_description(description, refresh=False)
-        
-                model.backward(loss)
-                # Correct gradient accumulation steps are handled withing the deepspeed engine's backward call.
-                
-                # for name, param in model.named_parameters():
-                #     hp_grad = safe_get_full_grad(param)
-                #     if args.global_rank<=0:
-                #         print("{}:{}".format(name,hp_grad))
-                
-                model.step()
-
-                # # for debug
-                # if (step + 1) % 100 == 0:
-                #     break  
-
-            # Evaluate perplexity on the validation set.
-            print_rank_0(
-                f"***** Evaluating perplexity, Epoch {epoch+1}/{args.num_train_epochs} *****",
-                args.global_rank)
-            perplexity = evaluation(model, eval_dataloader)
-            print_rank_0(f"ppl: {perplexity}", args.global_rank)
-            model.tput_timer.update_epoch_count()
-
-        #### Save ####
-        if args.output_dir is not None:
-            print_rank_0('saving the final model ...', args.global_rank)
-            if args.global_rank == 0:
-                save_hf_format(model, tokenizer, args)
-            if args.zero_stage == 3:
-                # For zero stage 3, each gpu only has a part of the model, so we need a special save function
-                save_zero_three_model(model,
-                                      args.global_rank,
-                                      args.output_dir,
-                                      zero_stage=args.zero_stage)
-            print_rank_0(f'Sucessful saving the final model to {args.output_dir}', args.global_rank)
 
 
 if __name__ == "__main__":
