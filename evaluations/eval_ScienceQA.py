@@ -7,18 +7,8 @@ def resolve(dataset: list):
     answers = []
     reasonings = []
     for datium in dataset:
-        # answer
-        if datium.find("Answer: ") == -1: # not found /format error
-            answer = ""
-        else:
-            answer = datium[datium.find("Answer: ") + 8: datium.find("Answer: ") + 9] # one char
-        answers.append(answer)
-        # reasoning
-        if datium.find("Because ") == -1: # not found /format error
-            reasoning = ""
-        else:
-            reasoning = datium[datium.find("Because ") + 8: len(datium)]
-        reasonings.append(reasoning)
+        answers.append(datium[0]) # the first char is the answer. e.g. A, B,...
+        reasonings.append(datium[2:]) # A/nBecause...
     outputs = {"answers": answers, "reasonings": reasonings}
     return outputs
 
