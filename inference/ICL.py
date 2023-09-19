@@ -17,6 +17,7 @@ import json
 import deepspeed
 import torch.distributed as dist
 from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
+from torch.utils.data.distributed import DistributedSampler
 
 
 import torch.nn.functional as F
@@ -40,17 +41,17 @@ from evaluations import eval_ScienceQA, eval_MeetingBank, eval_PapyrusF, eval_CS
 # os.environ['CUDA_VISIBLE_DEVICES']="0"
 
 
-Constrained_PROMPT = "Following the above examples to accomplish the task without generate extra examples.\n"
+Constrained_PROMPT = "We will give you several examples and you should follow them to accomplish the task.\n Examples:\n"
 
 
 TASK_PROMT={
     "FOMC":"What is the monetary policy stance for the following text? A. dovish, B. hawkish, C. neutral. Choose one from A, B and C.\n",
     "C-STANCE":"判断以下文本对指定对象的态度，选择一项：A.支持，B.反对，C.中立。输出A，B或者C。\n",
-    "ScienceQA":"Choose an answer for the following question and give your reasons. Your output should follow this format:\nAnswer: \nBecause \nNow let's begin!\n\n",
-    "NumGLUE-cm":"Solve the following math problem.\nQuestion:\n",
-    "NumGLUE-ds":"Solve the following math problem.\nQuestion:\n",
-    "MeetingBank":"Write a summary of the following meeting transcripts.\nMeeting transcripts:\n",
-    "Py150":"Continue writing the following code.\n",
+    "ScienceQA":"Choose an answer for the following question and give your reasons.\n\n",
+    "NumGLUE-cm":"Solve the following math problem.\n",
+    "NumGLUE-ds":"Solve the following math problem.\n",
+    "MeetingBank":"Write a summary of the following meeting transcripts.\n",
+    "Py150":"Continue writing the code.\n",
     "Papyrus-f":"Extract the key words of the following paper according to its title and abstract. Give your answer in French.\n"
 }
 
@@ -223,20 +224,23 @@ def main():
     def prediction(model, infer_dataloader, task):
         predicted_sequences = []
         sources_sequences = []
-        label_sequences = []
+        ground_truths = []
         model.eval()
 
         for step, batch in enumerate(infer_dataloader):
+            # sources_sequences += batch['sources']
+            ground_truths += batch['gts']
             ground_truths_ids = tokenizer(batch['gts'], 
                                             truncation=True,
                                             max_length=args.max_ans_len,
                                             add_special_tokens=False,
                                             padding='max_length',
                                             return_tensors='pt')['input_ids'].to(device)
-            del batch['gts']
             del batch['sources']
+            del batch['gts']
             batch = to_device(batch, device)
-            # prompt_len = batch['input_ids'].shape[1]
+            progress_bar.update(1)
+            prompt_len = batch['input_ids'].shape[1]
 
             # update progress bar
             if args.global_rank == 0:
@@ -257,15 +261,15 @@ def main():
                                             )
                 
             # add for distributed 
-            gathered_ids, max_seq_len = dist_results_gather(generate_ids, tokenizer.eos_token_id)
-            gathered_labels, max_label_len = dist_results_gather(ground_truths_ids, tokenizer.eos_token_id)
+            # gathered_ids, max_seq_len = dist_results_gather(generate_ids, tokenizer.eos_token_id)
+            # gathered_labels, max_label_len = dist_results_gather(ground_truths, tokenizer.eos_token_id)
             max_seq_len = batch['input_ids'].shape[1]
 
             if args.global_rank <= 0:
-                sou_sequences = tokenizer.batch_decode(gathered_ids[:, : max_seq_len], skip_special_tokens=True, clean_up_tokenization_spaces=False)
+                sou_sequences = tokenizer.batch_decode(generate_ids[:, : max_seq_len], skip_special_tokens=True, clean_up_tokenization_spaces=False)
                 if task=="FOMC" or task=="C-STANCE":
-                    pre_sequences = tokenizer.batch_decode(gathered_ids[:, max_seq_len:max_seq_len+1], skip_special_tokens=True, clean_up_tokenization_spaces=False)
-                pre_sequences = tokenizer.batch_decode(gathered_ids[:, max_seq_len], skip_special_tokens=True, clean_up_tokenization_spaces=False)
+                    pre_sequences = tokenizer.batch_decode(generate_ids[:, max_seq_len:max_seq_len+1], skip_special_tokens=True, clean_up_tokenization_spaces=False)
+                pre_sequences = tokenizer.batch_decode(generate_ids[:, max_seq_len:], skip_special_tokens=True, clean_up_tokenization_spaces=False)
 
                 if "NumGLUE" in task:
                     for i in range(len(pre_sequences)):
@@ -276,14 +280,15 @@ def main():
                 elif "ScienceQA" in task:
                     for i in range(len(pre_sequences)):
                         pre_sequences[i] = pre_sequences[i].split("Question:")[0]
-                lab_sequences = tokenizer.batch_decode(gathered_labels[:, : max_label_len], skip_special_tokens=True, clean_up_tokenization_spaces=False)
+                elif "Py150" in task:
+                    for i in range(len(pre_sequences)):
+                        pre_sequences[i] = pre_sequences[i].split("<EOL>")[0]
                 predicted_sequences += pre_sequences
                 sources_sequences += sou_sequences
-                label_sequences += lab_sequences
 
-        return sources_sequences, predicted_sequences, label_sequences
+        return sources_sequences, predicted_sequences, ground_truths
     
-    def get_random_demonstrations(dem_num, infer_dataset, length_limit):
+    def get_random_demonstrations(dem_num, infer_dataset, length_limit, task):
         length_limit_per_sample = length_limit/(dem_num*2)
         demonstrations=[]
         answers = []
@@ -295,11 +300,19 @@ def main():
                 break
             demonstration_id = random.randint(0,len(infer_dataset)-1)
             demonstration=infer_dataset[demonstration_id]  #[{prompt*4},{answer*4}]
-            demonstration["prompt"] = demonstration["prompt"][len(TASK_PROMT[task]):]
-            if len(tokenizer(demonstration["prompt"])['input_ids'])+ len(tokenizer(demonstration["answer"])['input_ids']) <= length_limit_per_sample and demonstration["answer"] not in answers:
-                demonstrations.append(demonstration)
-                answers.append(demonstration["answer"])
-                i+=1
+            if task!="Py150":
+                demonstration["prompt"] = demonstration["prompt"][len(TASK_PROMT[task]):]
+            if len(tokenizer(demonstration["prompt"])['input_ids'])+ len(tokenizer(demonstration["answer"])['input_ids']) <= length_limit_per_sample:
+                if task=="FOMC" or task=="C-STANCE":
+                    if answers.count(demonstration["answer"])<dem_num/3:
+                        demonstrations.append(demonstration)
+                        answers.append(demonstration["answer"])
+                        i+=1
+                else:
+                    if demonstration["answer"] not in answers:
+                        demonstrations.append(demonstration)
+                        answers.append(demonstration["answer"])
+                        i+=1
             else:
                 continue
             
@@ -356,9 +369,10 @@ def main():
                 args.seed
             )
         
-        demonstrations = get_random_demonstrations(int(args.demonstrations_num), infer_dataset, args.max_prompt_len-len(tokenizer(TASK_PROMT[task]+Constrained_PROMPT)['input_ids']))
+        demonstrations = get_random_demonstrations(int(args.demonstrations_num), infer_dataset, args.max_prompt_len-len(tokenizer(TASK_PROMT[task]+Constrained_PROMPT)['input_ids']),task)
         print_rank_0("demonstrations length:{}".format(len(demonstrations)),args.global_rank)
-        
+        if task=="MeetingBank":
+            demonstrations = []
         
         inf_data_collator = DataCollator(
                 tokenizer,
@@ -382,7 +396,6 @@ def main():
         progress_bar = tqdm(total=len(infer_dataloader), leave=True)
         print_rank_0("***** Start inference *****", args.global_rank)
         sources_sequences, predicted_sequences, ground_truths = prediction(model, infer_dataloader, task)
-        
         # for step, batch in enumerate(test_loader):
         #     batch_prompt = batch["prompt"]
         #     answer = batch["answer"]
@@ -409,7 +422,7 @@ def main():
             evaluation_result = eval_ScienceQA.eval(predicted_sequences, ground_truths)
         elif task == "MeetingBank":
             evaluation_result = eval_MeetingBank.eval(predicted_sequences, ground_truths)
-        elif task == "C-Stance":
+        elif task == "C-STANCE":
             evaluation_result = eval_CStance.eval(predicted_sequences, ground_truths)
         elif task == "Papyrus-f":
             evaluation_result = eval_PapyrusF.eval(predicted_sequences, ground_truths)

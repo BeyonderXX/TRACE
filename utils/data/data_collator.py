@@ -83,11 +83,19 @@ class DataCollator:
                 if self.demonstrations!=None:
                     task_prompt = ""
                     task_prompt += TASK_PROMT[self.task]
+                    if self.task!="MeetingBank": #MeetingBank不给例子
+                        task_prompt += Constrained_PROMPT
                     for demonstration in self.demonstrations:
+                        if self.task=="Py150":
+                            task_prompt+= "Code:\n"
                         task_prompt+=demonstration["prompt"]
                         task_prompt+=demonstration["answer"]+"\n\n"
+                    
+                    if self.task=="Py150":
+                        task_prompt+= "Code:\n"
                     # task_prompt += Constrained_PROMPT
-                    instruction = instruction[len(TASK_PROMT[self.task]):]
+                    if self.task!="Py150": #Py150不带prompt
+                        instruction = instruction[len(TASK_PROMT[self.task]):]
                     instruction = task_prompt+instruction
                 tokenize_source = self.tokenize(instruction, limit_len, add_bos_token=True, add_eos_token=False)
                 tokenized_sources.append(tokenize_source)
