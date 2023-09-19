@@ -1,8 +1,6 @@
-#!/bin/bash
-set -x
-
-
-deepspeed --include=localhost:0,1,2,3 --master_port 51420 training/main.py \
+#!bin/bash
+port=$(shuf -i25000-30000 -n1)
+deepspeed --include=localhost:0,1,2,3 --master_port $port training/main.py \
    --data_path /mnt/data/user/zhang_yuansen/LLM-CL_Benchmark \
    --dataset_name C-STANCE,FOMC,MeetingBank,Py150,ScienceQA,NumGLUE-cm,NumGLUE-ds,20Minuten \
    --model_name_or_path /mnt/data/user/zhang_yuansen/PTMs/llama-2-7b \
