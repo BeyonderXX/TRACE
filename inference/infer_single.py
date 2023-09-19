@@ -44,7 +44,7 @@ from utils.utils import print_rank_0, to_device, save_hf_format, set_random_seed
     get_optimizer_grouped_parameters, save_zero_three_model, load_hf_tokenizer
 from utils.ds_utils import get_train_ds_config
 from utils.model.model_utils import create_hf_model
-from evaluations import eval_ScienceQA, eval_MeetingBank, eval_PapyrusF, eval_CStance, eval_Py150, eval_FOMC, eval_NumGLUE_cm, eval_NumGLUE_ds # to be continued
+from evaluations import eval_ScienceQA, eval_MeetingBank, eval_PapyrusF, eval_CStance, eval_Py150, eval_FOMC, eval_NumGLUE_cm, eval_NumGLUE_ds, eval_20Minuten # to be continued
 
 
 # dist.init_process_group(backend='nccl')
@@ -208,7 +208,6 @@ def main():
             del batch['sources']
             del batch['gts']
             batch = to_device(batch, device)
-            progress_bar.update(1)
             prompt_len = batch['input_ids'].shape[1]
 
             # update progress bar
@@ -232,15 +231,12 @@ def main():
                                               temperature=args.temperature,
                                               do_sample=True,
                                               num_return_sequences=1,
-                                              use_cache=False
+                                              use_cache=True
                                               )
 
             sequences = tokenizer.batch_decode(generate_ids[:, prompt_len:], skip_special_tokens=True,
                                                clean_up_tokenization_spaces=False)
             predicted_sequences += sequences
-
-            # if step > 20:
-            #     break
 
         return sources_sequences, predicted_sequences, ground_truths
 
@@ -274,6 +270,8 @@ def main():
         evaluation_result = eval_NumGLUE_cm.eval(predicted_sequences, ground_truths)
     elif args.inference_task == "NumGLUE-ds":
         evaluation_result = eval_NumGLUE_ds.eval(predicted_sequences, ground_truths)
+    elif dataset == "20Minuten":
+        evaluation_result = eval_20Minuten.eval(sources_sequences, predicted_sequences, ground_truths)
     else:
         evaluation_result = {}
 
