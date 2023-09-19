@@ -36,3 +36,5 @@ peft
 rouge
 flash_attn
 qpth
+sacrebleu
+sacremoses
