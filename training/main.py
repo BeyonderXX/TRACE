@@ -124,8 +124,8 @@ def parse_args():
                         default=0.,
                         help="Weight decay to use.")
     parser.add_argument("--num_train_epochs",
-                        type=int,
-                        default=1,
+                        type=list_of_strings,
+                        default=None,
                         help="Total number of training epochs to perform.")
     parser.add_argument(
         "--gradient_accumulation_steps",
@@ -273,6 +273,17 @@ def main():
                 param.requires_grad = False
                 
     if args.CL_method == "OGD":
+        from peft import get_peft_model, LoraConfig, TaskType
+        
+        peft_config = LoraConfig(
+            task_type=TaskType.CAUSAL_LM, r=8, lora_alpha=32, lora_dropout=0.1
+        )
+        model = get_peft_model(model, peft_config)
+        for name, param in model.named_parameters():
+            if name.find("lora") != -1:
+                param.requires_grad = True
+
+    if args.CL_method == "lora":
         from peft import get_peft_model, LoraConfig, TaskType
         
         peft_config = LoraConfig(
