@@ -270,7 +270,7 @@ def main():
         evaluation_result = eval_NumGLUE_cm.eval(predicted_sequences, ground_truths)
     elif args.inference_task == "NumGLUE-ds":
         evaluation_result = eval_NumGLUE_ds.eval(predicted_sequences, ground_truths)
-    elif dataset == "20Minuten":
+    elif args.inference_task == "20Minuten":
         evaluation_result = eval_20Minuten.eval(sources_sequences, predicted_sequences, ground_truths)
     else:
         evaluation_result = {}
