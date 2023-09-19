@@ -296,7 +296,7 @@ def main():
             # Prepare the data
             _, _, infer_dataset = create_prompt_dataset(
                 args.local_rank,
-                args.data_path,
+                dataset_path,
                 args.data_output_path,
                 args.seed,
                 distributed=False
