@@ -149,67 +149,64 @@ def parse_args():
     return args
 
 
-def prediction(model, infer_dataloader):
-    predicted_sequences = []
-    sources_sequences = []
-    ground_truths = []
-    model.eval()
-    for step, batch in enumerate(infer_dataloader):
-        # TODO, add prompts, choosen, rejected
-        # implementation, batch = {k: v.to(device) for k, v in batch.items()}
-        sources_sequences += batch['sources']
-        ground_truths += batch['gts']
-        del batch['sources']
-        del batch['gts']
-        batch = to_device(batch, device)
-        prompt_len = batch['input_ids'].shape[1]
-        # update progress bar
-        progress_bar.update(1)
-        description = f"Step {step}"
-        progress_bar.set_description(description, refresh=False)
-        with torch.no_grad():
-            # TODO, add more inference params
-            # backbone config
-            # generate_ids = model.generate(batch['input_ids'], max_new_tokens=args.max_ans_len,
-            #                               pad_token_id=tokenizer.eos_token_id, attention_mask = batch['attention_mask'], temperature=0.7, do_sample=True, repetition_penalty=2.0 )
-            # sft config
-            generate_ids = model.generate(input_ids=batch['input_ids'],
-                                          attention_mask=batch['attention_mask'],
-                                          max_new_tokens=args.max_ans_len,
-                                          bos_token_id=tokenizer.bos_token_id,
-                                          eos_token_id=tokenizer.eos_token_id,
-                                          pad_token_id=tokenizer.unk_token_id,
-                                          temperature=args.temperature,
-                                          do_sample=True,
-                                          num_return_sequences=1,
-                                          use_cache=True
-                                          )
-        sequences = tokenizer.batch_decode(generate_ids[:, prompt_len:], skip_special_tokens=True,
-                                           clean_up_tokenization_spaces=False)
-        predicted_sequences += sequences
-    return sources_sequences, predicted_sequences, ground_truths
-
-
-def save_inference_results(evaluation_result: dict, sources_sequences: list, predicted_sequences: list,
-                            ground_truths: list, round: int, i_task: int, task: str):
-    # save as a json file
-    df = {"eval": evaluation_result, 'prompts': sources_sequences, 'results': predicted_sequences,
-            'labels': ground_truths}
-    if not os.path.exists(args.inference_output_path):
-        os.makedirs(args.inference_output_path)
-    with open(args.inference_output_path + "/results-" + str(round) + "-" + str(i_task) + "-" + task + ".json", "w+", encoding='utf-8') as file:
-        json.dump(df, file, ensure_ascii=False)
-
-
 def main():
     args = parse_args()
+    set_random_seed(args.seed)
     device = torch.device("cuda")
 
-    # If passed along, set the training seed now.
-    set_random_seed(args.seed)
+
+    def prediction(model, infer_dataloader):
+        predicted_sequences = []
+        sources_sequences = []
+        ground_truths = []
+        model.eval()
+        for step, batch in enumerate(infer_dataloader):
+            # TODO, add prompts, choosen, rejected
+            # implementation, batch = {k: v.to(device) for k, v in batch.items()}
+            sources_sequences += batch['sources']
+            ground_truths += batch['gts']
+            del batch['sources']
+            del batch['gts']
+            batch = to_device(batch, device)
+            prompt_len = batch['input_ids'].shape[1]
+            # update progress bar
+            progress_bar.update(1)
+            description = f"Step {step}"
+            progress_bar.set_description(description, refresh=False)
+            with torch.no_grad():
+                # TODO, add more inference params
+                # backbone config
+                # generate_ids = model.generate(batch['input_ids'], max_new_tokens=args.max_ans_len,
+                #                               pad_token_id=tokenizer.eos_token_id, attention_mask = batch['attention_mask'], temperature=0.7, do_sample=True, repetition_penalty=2.0 )
+                # sft config
+                generate_ids = model.generate(input_ids=batch['input_ids'],
+                                              attention_mask=batch['attention_mask'],
+                                              max_new_tokens=args.max_ans_len,
+                                              bos_token_id=tokenizer.bos_token_id,
+                                              eos_token_id=tokenizer.eos_token_id,
+                                              pad_token_id=tokenizer.unk_token_id,
+                                              temperature=args.temperature,
+                                              do_sample=True,
+                                              num_return_sequences=1,
+                                              use_cache=True
+                                              )
+            sequences = tokenizer.batch_decode(generate_ids[:, prompt_len:], skip_special_tokens=True,
+                                               clean_up_tokenization_spaces=False)
+            predicted_sequences += sequences
+        return sources_sequences, predicted_sequences, ground_truths
+
+    def save_inference_results(evaluation_result: dict, sources_sequences: list, predicted_sequences: list,
+                                ground_truths: list, round: int, i_task: int, task: str):
+        # save as a json file
+        df = {"eval": evaluation_result, 'prompts': sources_sequences, 'results': predicted_sequences,
+                'labels': ground_truths}
+        if not os.path.exists(args.inference_output_path):
+            os.makedirs(args.inference_output_path)
+        with open(args.inference_output_path + "/results-" + str(round) + "-" + str(i_task) + "-" + task + ".json", "w+", encoding='utf-8') as file:
+            json.dump(df, file, ensure_ascii=False)
+
 
     tokenizer = load_hf_tokenizer(args.model_name_or_path, fast_tokenizer=True)
-
     # default the LLM is decoder only model, so padding side is left
     assert tokenizer.padding_side == 'left'
     assert tokenizer.truncation_side == "left"
