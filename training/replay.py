@@ -24,6 +24,7 @@ from transformers import (
     SchedulerType,
     default_data_collator,
     get_scheduler,
+    get_constant_schedule_with_warmup
 )
 
 import deepspeed
@@ -41,11 +42,11 @@ from utils.module.lora import convert_linear_layer_to_lora, convert_lora_to_line
 from utils.model.model_utils import create_hf_model
 
 # add flash attention
-# from utils.flash_attention.llama_flash_att import replace_llama_attn_with_flash_attn
-# from utils.flash_attention.bloom_flash_att import replace_bloom_attn_with_flash_attn
+from utils.flash_attention.llama_flash_att import replace_llama_attn_with_flash_attn
+from utils.flash_attention.bloom_flash_att import replace_bloom_attn_with_flash_attn
 
-# replace_llama_attn_with_flash_attn()
-# replace_bloom_attn_with_flash_attn()
+replace_llama_attn_with_flash_attn()
+replace_bloom_attn_with_flash_attn()
 
 # my_peft中修改了lora相关的逻辑
 from model.Replay.LFPT5 import getInitialPrompt
@@ -129,8 +130,8 @@ def parse_args():
                         default=0.,
                         help="Weight decay to use.")
     parser.add_argument("--num_train_epochs",
-                        type=int,
-                        default=1,
+                        type=list_of_strings,
+                        default=None,
                         help="Total number of training epochs to perform.")
     parser.add_argument(
         "--gradient_accumulation_steps",
@@ -353,11 +354,9 @@ def main():
         total_train_dataloader_len = sum(len(train_task_list[task]) for task in list(train_task_list.keys()))
         num_update_steps_per_epoch = math.ceil(
             total_train_dataloader_len / args.gradient_accumulation_steps)
-        lr_scheduler = get_scheduler(
-            name=args.lr_scheduler_type,
+        lr_scheduler = get_constant_schedule_with_warmup(
             optimizer=optimizer,
-            num_warmup_steps=args.num_warmup_steps,
-            num_training_steps=args.num_train_epochs * num_update_steps_per_epoch,
+            num_warmup_steps=args.num_warmup_steps
         )
         
         return optimizer, lr_scheduler
@@ -384,12 +383,6 @@ def main():
 
     # Initialize the global progress bar
     def train_one_task(task, i_task, epochs):
-        # 在单独某个任务上训练
-        if args.local_rank == -1:
-            device = torch.device("cuda")
-        else:
-            torch.cuda.set_device(args.local_rank)
-            device = torch.device("cuda", args.local_rank)
         
         #### TRAIN ####
         train_dataloader = train_task_list[task]
@@ -485,8 +478,8 @@ def main():
 
 
     for i_task, task in enumerate(train_task_list):
-        train_one_task(task, i_task, args.num_train_epochs)
-        replay(i_task, args.num_train_epochs)
+        train_one_task(task, i_task, int(args.num_train_epochs[i_task]))
+        replay(i_task, 1)
         save_model(i_task)
         # CL_Trainer.save_model()
         
