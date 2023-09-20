@@ -33,9 +33,8 @@ from utils.utils import print_rank_0, to_device, save_hf_format, set_random_seed
     get_optimizer_grouped_parameters, save_zero_three_model, load_hf_tokenizer
 from utils.ds_utils import get_train_ds_config
 from utils.model.model_utils import create_hf_model
-from evaluations import eval_ScienceQA, eval_MeetingBank, eval_PapyrusF, eval_CStance, eval_Py150, eval_FOMC, eval_NumGLUE_cm, eval_NumGLUE_ds # to be continued
 from training.params import Method2Class, AllDatasetName
-from evaluations import eval_ScienceQA, eval_MeetingBank, eval_PapyrusF, eval_CStance, eval_Py150, eval_FOMC, eval_NumGLUE_cm, eval_NumGLUE_ds # to be continued
+from evaluations import eval_ScienceQA, eval_MeetingBank, eval_PapyrusF, eval_CStance, eval_Py150, eval_FOMC, eval_NumGLUE_cm, eval_NumGLUE_ds, eval_20Minuten # to be continued
 
 
 # os.environ['CUDA_VISIBLE_DEVICES']="0"
@@ -52,7 +51,7 @@ TASK_PROMT={
     "NumGLUE-ds":"Solve the following math problem.\n",
     "MeetingBank":"Write a summary of the following meeting transcripts.\n",
     "Py150":"Continue writing the code.\n",
-    "Papyrus-f":"Extract the key words of the following paper according to its title and abstract. Give your answer in French.\n"
+    "20Minuten":"Provide a simplified version of the following paragraph in German.\n\n"
 }
 
 def collate_function(batch_prompt,demonstrations, task):
@@ -239,8 +238,6 @@ def main():
             del batch['sources']
             del batch['gts']
             batch = to_device(batch, device)
-            progress_bar.update(1)
-            prompt_len = batch['input_ids'].shape[1]
 
             # update progress bar
             if args.global_rank == 0:
@@ -269,7 +266,8 @@ def main():
                 sou_sequences = tokenizer.batch_decode(generate_ids[:, : max_seq_len], skip_special_tokens=True, clean_up_tokenization_spaces=False)
                 if task=="FOMC" or task=="C-STANCE":
                     pre_sequences = tokenizer.batch_decode(generate_ids[:, max_seq_len:max_seq_len+1], skip_special_tokens=True, clean_up_tokenization_spaces=False)
-                pre_sequences = tokenizer.batch_decode(generate_ids[:, max_seq_len:], skip_special_tokens=True, clean_up_tokenization_spaces=False)
+                else:
+                    pre_sequences = tokenizer.batch_decode(generate_ids[:, max_seq_len:], skip_special_tokens=True, clean_up_tokenization_spaces=False)
 
                 if "NumGLUE" in task:
                     for i in range(len(pre_sequences)):
@@ -283,6 +281,9 @@ def main():
                 elif "Py150" in task:
                     for i in range(len(pre_sequences)):
                         pre_sequences[i] = pre_sequences[i].split("<EOL>")[0]
+                elif "20Minuten" in task:
+                    for i in range(len(pre_sequences)):
+                        pre_sequences[i] = pre_sequences[i].split("Paragraph")[0]
                 predicted_sequences += pre_sequences
                 sources_sequences += sou_sequences
 
@@ -434,8 +435,8 @@ def main():
             evaluation_result = eval_NumGLUE_cm.eval(predicted_sequences, ground_truths)
         elif task == "NumGLUE-ds":
             evaluation_result = eval_NumGLUE_ds.eval(predicted_sequences, ground_truths)
-        else:
-            evaluation_result = {}
+        elif task == "20Minuten":
+            evaluation_result = eval_20Minuten.eval(sources_sequences, predicted_sequences, ground_truths)
             
             
             
