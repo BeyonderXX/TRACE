@@ -108,7 +108,7 @@ class CL_Base_Model:
     
     def train_continual(self):
         for i_task, task in enumerate(self.train_task_list):
-            self.train_one_task(task, i_task, self.args.num_train_epochs)
+            self.train_one_task(task, i_task, int(self.args.num_train_epochs[i_task]))
             self.save_model(i_task)
 
     
