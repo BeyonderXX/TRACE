@@ -10,4 +10,4 @@ deepspeed --include=localhost:0 --master_port $port inference/ICL.py  \
     --seed 1234 \
     --deepspeed \
     --demonstrations_num 6 \
-    --inference_output_path /workspace/output/llama-7b-chat-inference-ICL
+    --inference_output_path /mnt/data/user/zhang_yuansen/outputs_LLM-CL/ICL > /mnt/data/user/zhang_yuansen/outputs_LLM-CL/ICL/infer.log 2>&1 &
