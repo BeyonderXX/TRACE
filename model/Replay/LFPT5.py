@@ -14,8 +14,8 @@ from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
 
 
 def getInitialPrompt(tokenizer, prompt_token_number):
-    t5_tokenizer = AutoTokenizer.from_pretrained("t5-large") 
-    fr = open('model/Replay/allnumber.pickle', 'rb') # t5词频表
+    t5_tokenizer = AutoTokenizer.from_pretrained("t5-large")
+    fr = open('model/Replay/allnumber.pickle', 'rb')
     all_tokens = pickle.load(fr)
     sorted_all_tokens = sorted(all_tokens.items(), key=lambda item: item[1], reverse=True)
     top5000_t5 = []
@@ -23,7 +23,6 @@ def getInitialPrompt(tokenizer, prompt_token_number):
         if len(top5000_t5) < 5000:
             top5000_t5.append(t5_tokenizer.decode(one[0]))
 
-    # 以t5词表为基准，如果当前词表中有对应的token则加入，否则随机选择
     top5000 = []
     vocab = []
     for token_id in range(len(tokenizer)):
@@ -35,7 +34,6 @@ def getInitialPrompt(tokenizer, prompt_token_number):
             random_token = random.choice(vocab)
             top5000.append(random_token)
 
-    # 从top5000里随机挑选token直至prompt的最大长度
     tokens_to_use = random.sample(top5000, prompt_token_number)
     initial_prompt = " ".join(tokens_to_use)
     input_ids = tokenizer.encode(initial_prompt)[:prompt_token_number]
@@ -54,23 +52,13 @@ class LFPT5(CL_Base_Model):
         1. prompt tuning
         2. pseudo data generation
         '''
-        # 增添2种特殊字符：
-        # 1. "__ans__"                  伪数据prompt/answer的分隔符
-        # 2. "__" + task name + "__"    生成伪数据任务的起始符
-        
-        # # NOT ALLOWED for LLaMA tokenizer!!!
-        # tasks_name = self.args.dataset_name
-        # self.tokenizer.add_tokens("__ans__")
-        # for task_name in tasks_name:
-        #     self.tokenizer.add_tokens("__" + task_name + "__")
-
         if self.args.local_rank == -1:
             self.device = torch.device("cuda")
         else:
             torch.cuda.set_device(self.args.local_rank)
             self.device = torch.device("cuda", self.args.local_rank)
 
-        self.lambda_lm = lambda_lm # LM损失的权重系数
+        self.lambda_lm = lambda_lm
 
 
     def get_dataloader(self, task, pseudo_prompt=None, pseudo_answer=None, isLM=False):
@@ -94,7 +82,7 @@ class LFPT5(CL_Base_Model):
             answer_dataset_lm = []
             for idx in range(len(prompt_dataset)):
                 prompt_dataset_lm.append("__" + task + "__")
-                answer_dataset_lm.append(prompt_dataset[idx] + "<unk>" + answer_dataset[idx])
+                answer_dataset_lm.append(prompt_dataset[idx] + "__ans__" + answer_dataset[idx])
             train_dataset.prompt_dataset = prompt_dataset_lm
             train_dataset.answer_dataset = answer_dataset_lm
         
@@ -130,7 +118,7 @@ class LFPT5(CL_Base_Model):
                 print_rank_0(f"pseudo data generation is completed", self.args.global_rank)
                 break 
             # generate pseudo data of the previous task, given a special token __<task_name>__
-            print_rank_0(f"generating pseudo data for the task: " + task_name, self.args.local_rank)
+            print_rank_0(f"generating pseudo data for the task: " + task_name, self.args.global_rank)
             self.model.eval()
             input_ids = self.tokenizer.encode("__" + task_name + "__", return_tensors='pt').to(self.device)
             input_ids = input_ids.repeat(self.args.per_device_eval_batch_size,1)
@@ -141,52 +129,30 @@ class LFPT5(CL_Base_Model):
             pseudo_prompt_lm = []
             pseudo_answer_lm = []
             for time in range(times_of_generation):
-                print_rank_0(f"Generating pseudo data. " + str(times_of_generation - time) + " more times left.", self.args.local_rank)
+                print_rank_0(f"Generating pseudo data. " + str(times_of_generation - time) + " more times left.", self.args.global_rank)
                 output = self.model.generate(
                     input_ids=input_ids, 
                     attention_mask=attention_mask,
                     max_new_tokens=max_len,
                     do_sample=True,
                     temperature=0.7,
-                    repetition_penalty=1.5,
-                    top_k=50,
-                    top_p=0.95,
+                    repetition_penalty=1.05,
                     num_return_sequences=5,
                     )
                 generated_texts = self.tokenizer.batch_decode(output, skip_special_tokens=True)
+                print_rank_0(f"samples generated:", self.args.global_rank)
+                for i in range(10):
+                    print_rank_0(generated_texts[i], self.args.global_rank)
                 for generated_text in generated_texts:
-                    if "<unk>" in generated_text:
+                    if "__ans__" in generated_text:
                         generated_text = generated_text.replace("__" + task_name + "__", "")
-                        pseudo_prompt.append(generated_text.split("<unk>")[0])
-                        pseudo_answer.append(generated_text.split("<unk>")[1])
+                        pseudo_prompt.append(generated_text.split("__ans__")[0])
+                        pseudo_answer.append(generated_text.split("__ans__")[1])
                         pseudo_prompt_lm.append("__" + task_name + "__")
                         pseudo_answer_lm.append(generated_text)
-            print_rank_0(f"number of available pseudo prompts:" + str(len(pseudo_prompt)), self.args.local_rank)
+            print_rank_0(f"number of available pseudo prompts:" + str(len(pseudo_prompt)), self.args.global_rank)
             i += 1
         return pseudo_prompt, pseudo_answer, pseudo_prompt_lm, pseudo_answer_lm
-        
-
-    def evaluation(self, eval_dataloader):
-        self.model.eval()
-        losses = 0
-        for step, batch in enumerate(eval_dataloader):
-            # implementation, batch = {k: v.to(device) for k, v in batch.items()}
-            del batch['sources']
-            batch = to_device(batch, self.device)
-            with torch.no_grad():
-                outputs = self.model(**batch)
-            loss = outputs.loss
-            losses += loss.float()
-        losses = losses / (step + 1)
-        try:
-            perplexity = torch.exp(losses)
-        except OverflowError:
-            perplexity = float("inf")
-        try:
-            perplexity = get_all_reduce_mean(perplexity).item()
-        except:
-            pass
-        return perplexity
 
 
     def train_one_task(self, task, i_task, epochs):
@@ -229,34 +195,18 @@ class LFPT5(CL_Base_Model):
                 # Correct gradient accumulation steps are handled withing the deepspeed engine's backward call.
                 self.model.step()
 
-            # Evaluate perplexity on the validation set.
-            print_rank_0(
-                f"***** Evaluating perplexity, Epoch {epoch+1}/{epochs} *****",
-                self.args.global_rank)
-            perplexity = self.evaluation(eval_dataloader)
-            print_rank_0(f"ppl: {perplexity}", self.args.global_rank)
-            self.model.tput_timer.update_epoch_count()
-
         #### SAVE ####
         if self.args.output_dir is not None:
             print_rank_0('saving the final model ...', self.args.global_rank)
 
+        if self.args.global_rank == 0:
             peft_model_id = os.path.join(self.args.output_dir, str(i_task))
-            try:
-                if not os.path.exists(peft_model_id):
-                    os.makedirs(peft_model_id)
-            except:
-                None
+            if not os.path.exists(peft_model_id):
+                os.makedirs(peft_model_id)
             self.model.save_pretrained(peft_model_id)  
             self.tokenizer.save_pretrained(peft_model_id)
             print_rank_0(f'Sucessfully saving the final model to {peft_model_id}', self.args.global_rank)
-            
-            if i_task < num_task - 1:
-                print_rank_0(f'Let\'s have a little break to get ready for the next task! ^-ω-^Zzz...', self.args.global_rank)
-                time.sleep(10)
-            else:
-                print_rank_0(f'Mission Complete! \^·ω·^/', self.args.global_rank)
 
 
-    def save_model(self):
+    def save_model(self, i_task):
         pass
