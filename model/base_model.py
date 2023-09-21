@@ -114,7 +114,7 @@ class CL_Base_Model:
     
     def save_model(self, round):
         if self.args.output_dir is not None:
-            print_rank_0('saving model ...', self.args.global_rank)
+            print_rank_0('saving model to ' + self.args.output_dir + "/" + str(round) + '...', self.args.global_rank)
 
         if self.args.global_rank == 0:
             save_hf_format(self.model, self.tokenizer, self.args, sub_folder=str(round))
