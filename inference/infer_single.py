@@ -214,18 +214,18 @@ def main():
     # set evaluation batch size
     # only support bs = 1, cause right padding training logic
     # TODO, modify left pad for training and inference
-    model = create_hf_model(AutoModelForCausalLM,
-                            args.model_name_or_path,
-                            tokenizer,
-                            ds_config=None,
-                            )
-
     inference_tasks = args.inference_tasks 
     task_num = len(inference_tasks)
     for round in range(task_num):   # load models and adapters of a new round in continual learning
         inference_model_path = os.path.join(args.inference_model_path, str(round))
         print_rank_0("Inference Model Path: " + inference_model_path, args.local_rank)
 
+        model = create_hf_model(AutoModelForCausalLM,
+                                args.model_name_or_path,
+                                tokenizer,
+                                ds_config=None,
+                                )
+        
         # TODO: add adapters
         if args.CL_method == "LFPT5":
             from peft import PeftModel
