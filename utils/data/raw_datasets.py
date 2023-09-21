@@ -87,7 +87,7 @@ class LocalJsonFileDataset(PromptRawDataset):
         super().__init__(output_path, seed, local_rank, dataset_name)
         self.dataset_name = "local_jsonfile"
         self.dataset_name_clean = "jsonfile"
-        assert os.path.exists(dataset_name)
+        assert os.path.exists(dataset_name), f"Not found, plz check path {dataset_name}!"
         self.for_backbone = for_backbone
         self.raw_datasets = load_dataset('json',
                                          data_files={
