@@ -27,33 +27,10 @@ class O_LoRA(CL_Base_Model):
             self.device = torch.device("cuda", self.args.local_rank)
 
 
-    def evaluation(self, eval_dataloader):
-        self.model.eval()
-        losses = 0
-        for step, batch in enumerate(eval_dataloader):
-            # implementation, batch = {k: v.to(device) for k, v in batch.items()}
-            del batch['sources']
-            batch = to_device(batch, self.device)
-            with torch.no_grad():
-                outputs = self.model(**batch)
-            loss = outputs.loss
-            losses += loss.float()
-        losses = losses / (step + 1)
-        try:
-            perplexity = torch.exp(losses)
-        except OverflowError:
-            perplexity = float("inf")
-        try:
-            perplexity = get_all_reduce_mean(perplexity).item()
-        except:
-            pass
-        return perplexity
-
-
     def train_one_task(self, task, i_task, epochs):
-        if i_task > 0:
-            self.lamda_2 = 0.1
-
+        # if i_task > 0:
+        #     self.lamda_2 = 0.1
+        
         num_task = len(self.train_task_list)
         train_dataloader = self.train_task_list[task]
         eval_dataloader = self.eval_task_list[task]
@@ -79,7 +56,7 @@ class O_LoRA(CL_Base_Model):
                         for name_, param_ in self.model.named_parameters():
                             if "loranew_A" in name_ and name.split("lora_A")[0] == name_.split("loranew_A")[0]:
                                 orthogonal_loss += torch.abs(torch.mm(param, param_.T)).sum() # [r * dim] * [dim * r]
-                                break # target modules have been matched
+                                break 
 
                 # l2-normalization for loranew_A/B
                 l2_loss = 0.
@@ -100,14 +77,6 @@ class O_LoRA(CL_Base_Model):
                 self.model.backward(loss)
                 # Correct gradient accumulation steps are handled withing the deepspeed engine's backward call.
                 self.model.step()
-
-            # Evaluate perplexity on the validation set.
-            print_rank_0(
-                f"***** Evaluating perplexity, Epoch {epoch+1}/{epochs} *****",
-                self.args.global_rank)
-            perplexity = self.evaluation(eval_dataloader)
-            print_rank_0(f"ppl: {perplexity}", self.args.global_rank)
-            self.model.tput_timer.update_epoch_count()
 
         def split_string_by_first_num(s):  
             for i, c in enumerate(s):  
@@ -133,28 +102,28 @@ class O_LoRA(CL_Base_Model):
                     if ("v_proj.loranew_A" in k_) and (k.split("v_proj.lora_A")[0] == k_.split("v_proj.loranew_A")[0]):
                         state_dict[k] = torch.cat((state_dict[k], state_dict[k_]), dim=0) # [r_sum + r, dim]
                         layer_list[layer_id].self_attn.v_proj.lora_A.default.weight.data = state_dict[k]
-                        break # target modules have been matched
+                        break 
                 flag += 1
             elif "q_proj.lora_A" in k:   
                 for k_ in state_dict:
                     if ("q_proj.loranew_A" in k_) and (k.split("q_proj.lora_A")[0] == k_.split("q_proj.loranew_A")[0]):
                         state_dict[k] = torch.cat((state_dict[k], state_dict[k_]), dim=0) # [r_sum + r, dim]
                         layer_list[layer_id].self_attn.q_proj.lora_A.default.weight.data = state_dict[k]
-                        break # target modules have been matched
+                        break 
                 flag += 1
             elif "v_proj.lora_B" in k:
                 for k_ in state_dict:
                     if ("v_proj.loranew_B" in k_) and (k.split("v_proj.lora_B")[0] == k_.split("v_proj.loranew_B")[0]):
                         state_dict[k] = torch.cat((state_dict[k], state_dict[k_]), dim=1) # [dim, r_sum + r]
                         layer_list[layer_id].self_attn.v_proj.lora_B.default.weight.data = state_dict[k]
-                        break # target modules have been matched
+                        break 
                 flag += 1
             elif "q_proj.lora_B" in k:
                 for k_ in state_dict:
                     if ("q_proj.loranew_B" in k_) and (k.split("q_proj.lora_B")[0] == k_.split("q_proj.loranew_B")[0]):
                         state_dict[k] = torch.cat((state_dict[k], state_dict[k_]), dim=1) # [dim, r_sum + r]
                         layer_list[layer_id].self_attn.q_proj.lora_B.default.weight.data = state_dict[k]
-                        break # target modules have been matched
+                        break 
                 flag += 1
             if flag == 4:
                 layer_id += 1
@@ -177,22 +146,14 @@ class O_LoRA(CL_Base_Model):
         if self.args.output_dir is not None:
             print_rank_0('saving the final model ...', self.args.global_rank)
 
+        if self.args.global_rank == 0:
             peft_model_id = os.path.join(self.args.output_dir, str(i_task))
-            try:
-                if not os.path.exists(peft_model_id):
-                    os.makedirs(peft_model_id)
-            except:
-                None
+            if not os.path.exists(peft_model_id):
+                os.makedirs(peft_model_id)
             self.model.save_pretrained(peft_model_id)  
             self.tokenizer.save_pretrained(peft_model_id)
             print_rank_0(f'Sucessfully saving the final model to {peft_model_id}', self.args.global_rank)
-            
-            if i_task < num_task - 1:
-                print_rank_0(f'Let\'s have a little break to get ready for the next task! ^-ω-^Zzz...', self.args.global_rank)
-                time.sleep(10)
-            else:
-                print_rank_0(f'Mission Complete! \^·ω·^/', self.args.global_rank)
 
 
-    def save_model(self):
+    def save_model(self, i_task):
         pass
