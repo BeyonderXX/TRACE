@@ -56,6 +56,9 @@ def load_hf_tokenizer(model_name_or_path, fast_tokenizer=True):
         tokenizer = AutoTokenizer.from_pretrained(
             model_name_or_path, fast_tokenizer=fast_tokenizer, trust_remote_code=True)
         tokenizer.pad_token = tokenizer.eos_token
+        # for falcon
+        if tokenizer.bos_token is None:
+            tokenizer.bos_token = tokenizer.eos_token
         # make sure tokenizer is right pad in our logic
         tokenizer.padding_side = 'left'
 
