@@ -28,9 +28,9 @@ class O_LoRA(CL_Base_Model):
 
 
     def train_one_task(self, task, i_task, epochs):
-        if i_task > 0:
-            self.lamda_2 = 0.1
-
+        # if i_task > 0:
+        #     self.lamda_2 = 0.1
+        
         num_task = len(self.train_task_list)
         train_dataloader = self.train_task_list[task]
         eval_dataloader = self.eval_task_list[task]
