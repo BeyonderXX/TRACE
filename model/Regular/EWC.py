@@ -10,9 +10,10 @@ from model.base_model import CL_Base_Model
 
 
 class EWC(CL_Base_Model):
-    def __init__(self,model, tokenizer, optimizer, train_task_list, eval_task_list, test_task_list, args):
+    def __init__(self,model, tokenizer, optimizer, train_task_list, eval_task_list, test_task_list, args, lambda_ewc=400):
         super().__init__(model, tokenizer, optimizer, train_task_list, eval_task_list, test_task_list, args)
         self.device="cuda"
+        self.lambda_ewc = lambda_ewc
         self.params = {n: p for n, p in self.model.named_parameters() if p.requires_grad}
         self._previous_params = {}
 
@@ -22,6 +23,7 @@ class EWC(CL_Base_Model):
         
         self.fisher = {}
         self.init_fisher()
+        del self.params
 
 
     
@@ -34,7 +36,7 @@ class EWC(CL_Base_Model):
     def _update_fisher(self):
         for n, p in self.model.named_parameters():
             if n in self.grads.keys():
-                self.fisher[n].data += self.grads[n].cuda().data ** 2
+                self.fisher[n].data += self.grads[n].cuda().data ** 2 / self.train_length
     #正则化，除以训练集长度
     def _regular_fisher(self):
         for n, p in self.model.named_parameters():
@@ -51,8 +53,9 @@ class EWC(CL_Base_Model):
         restrict_loss = 0
         precision_matrices = self.fisher
         for n, p in self.model.named_parameters():
-            restrict_loss_params = precision_matrices[n] * (p - self._previous_params[n].cuda()) ** 2
-            restrict_loss += restrict_loss_params.sum()
+            if p.requires_grad==True:
+                restrict_loss_params = precision_matrices[n] * (p - self._previous_params[n].cuda()) ** 2
+                restrict_loss += restrict_loss_params.sum()
         return restrict_loss
     
     def train_step(self,
@@ -70,7 +73,7 @@ class EWC(CL_Base_Model):
         loss = outputs[0]
         if self.task_num!=0:
             restrict_loss = self.penalty()
-            loss += restrict_loss
+            loss += 0.5*self.lambda_ewc*restrict_loss
 
         return loss
     
@@ -79,21 +82,24 @@ class EWC(CL_Base_Model):
             grad = torch.nan_to_num(grad, nan=0)
             # grad = torch.clamp(grad, -self.args.ds_config['gradient_clipping'], self.args.ds_config['gradient_clipping'])
             self.grads[name] = grad.cpu()
+            del grad
         return hook
     def retain_grad(self):
         for n,p in self.model.named_parameters():
-            p.register_hook(self.save_grad(n))
+            if n in self.fisher.keys():
+                p.register_hook(self.save_grad(n))
     
     
     def train_one_task(self,
                        task,
+                       i_task,
                        epochs=40):
 
         print('task = ', task)
 
         dataloader_train = self.train_task_list[task]
         self.train_length = len(dataloader_train)
-        total_steps = self.args.num_train_epochs * len(dataloader_train)
+        total_steps = epochs * len(dataloader_train)
         progress_bar = tqdm(total=total_steps, leave=True, disable=(self.args.global_rank != 0))
 
 
@@ -124,8 +130,8 @@ class EWC(CL_Base_Model):
 
         for i_task, task in enumerate(self.train_task_list):
             self.task_num=i_task
-            self.train_one_task(task, self.args.num_train_epochs)
-            self._regular_fisher()  
+            self.train_one_task(task, i_task, int(self.args.num_train_epochs[i_task]))
+            # self._regular_fisher()
             
             self._update_previous_params()
             self.save_model(i_task)

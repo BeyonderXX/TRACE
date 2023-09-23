@@ -19,7 +19,8 @@ class GEM(CL_Base_Model):
         self.n_tasks = len(self.train_task_list.keys())
         self.grads = {}
         for name, param in self.model.named_parameters():
-            self.grads[name] = torch.zeros([param.data.numel(), self.n_tasks], dtype=torch.bfloat16)
+            if param.requires_grad==True:
+                self.grads[name] = torch.zeros([param.data.numel(), self.n_tasks], dtype=torch.bfloat16)
         # self.grads = torch.zeros([sum(self.grad_dims), self.n_tasks], dtype=torch.bfloat16)  #存储每个任务的梯度
         # self.cnt=len(self.grad_dims)
 
@@ -37,10 +38,11 @@ class GEM(CL_Base_Model):
         # grads[:, tid].fill_(0.0)
         print_rank_0("Storing gradient................", self.args.global_rank)
         for name, param in self.model.named_parameters():
-            hp_grad = safe_get_full_grad(param)
-            if hp_grad is not None:
+            if param.requires_grad==True:
+                hp_grad = safe_get_full_grad(param)
+                if hp_grad is not None:
 
-                grads[name][:,tid].copy_(hp_grad.data.view(-1).cpu())
+                    grads[name][:,tid].copy_(hp_grad.data.view(-1).cpu())
                 
     def project2cone2(self, name, gradient, indx, margin=0.5, eps=1e-3):
         """
@@ -130,9 +132,8 @@ class GEM(CL_Base_Model):
             
         #     params.register_hook(lambda grads: self.project2cone2(grads,indx))
         for epoch in range(epochs):
-            print(epoch)
             self.model.train()
-            total_steps = self.args.num_train_epochs * len(dataloader_train)
+            total_steps = epochs * len(dataloader_train)
             progress_bar = tqdm(total=total_steps, leave=True, disable=(self.args.global_rank != 0))
 
             for step, batch in enumerate(tqdm(dataloader_train)):
@@ -149,7 +150,7 @@ class GEM(CL_Base_Model):
                 self.model.backward(loss)
                 if i_task!=0:
                     for name, param in self.model.named_parameters():
-                        if param.grad!=None:
+                        if param.requires_grad and param.grad!=None:
                             param.grad.data.copy_(self.project2cone2(name, param.grad, indx))
                 # for name, param in self.model.named_parameters():
                 #     hp_grad = safe_get_full_grad(param)

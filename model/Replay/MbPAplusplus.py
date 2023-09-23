@@ -8,10 +8,15 @@ import random
 from model.base_model import CL_Base_Model
 from tqdm import tqdm
 from utils.utils import print_rank_0, to_device, save_hf_format, set_random_seed, get_all_reduce_mean, get_optimizer_grouped_parameters, save_zero_three_model, load_hf_tokenizer
-from evaluations import eval_ScienceQA, eval_MeetingBank, eval_PapyrusF, eval_CStance, eval_Py150, eval_FOMC, eval_NumGLUE_cm, eval_NumGLUE_ds # to be continued
+from evaluations import eval_ScienceQA, eval_MeetingBank, eval_PapyrusF, eval_CStance, eval_Py150, eval_FOMC, eval_NumGLUE_cm, eval_NumGLUE_ds, eval_20Minuten # to be continued
 from transformers import GenerationConfig
 import json
 import os
+from utils.data.data_utils import create_prompt_dataset
+from utils.utils import print_rank_0, to_device, save_hf_format, set_random_seed, get_all_reduce_mean, \
+    get_optimizer_grouped_parameters, save_zero_three_model, load_hf_tokenizer
+from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
+
 generation_config = GenerationConfig(
     temperature=0.1,
     do_sample=True,
@@ -106,13 +111,14 @@ class MbPAplusplus(CL_Base_Model):
     Implements Memory based Parameter Adaptation model
     """
 
-    def __init__(self, model, tokenizer, optimizer, train_task_list, eval_task_list, test_task_list, args, L=30, K_neightbors=32, replay_size=0):
+    def __init__(self, model, tokenizer, optimizer, train_task_list, eval_task_list, test_task_list, args, L=10, K_neightbors=16, replay_size=0, memory_per_task=100):
         super().__init__(model, tokenizer, optimizer, train_task_list, eval_task_list, test_task_list, args)
         self.REPLAY_FREQ = 0  #  多少step后replay
         self.L = L                      #  replay多少轮
         self.memory = ReplayMemory()
         self.K_neightbors = K_neightbors
         self.replay_size = replay_size
+        self.memory_per_task = memory_per_task
         self.train_batch_size = self.args.per_device_train_batch_size
         self.eval_batch_size = self.args.per_device_eval_batch_size
 
@@ -128,9 +134,10 @@ class MbPAplusplus(CL_Base_Model):
     def train_one_task(self, task, i_task, epochs):
         dataloader_train = self.train_task_list[task]
         self.train_length = len(dataloader_train)
-        total_steps = self.args.num_train_epochs * len(dataloader_train)
+        total_steps = epochs * len(dataloader_train)
         progress_bar = tqdm(total=total_steps, leave=True, disable=(self.args.global_rank != 0))
         self.REPLAY_FREQ = total_steps//4
+        memory_num=0
 
         for epoch in range(epochs):
 
@@ -138,6 +145,7 @@ class MbPAplusplus(CL_Base_Model):
 
             # Train the data for one epoch
             for step, batch in enumerate(tqdm(dataloader_train)):
+
                 del batch['sources']
 
                 # Release file descriptors which function as shared
@@ -147,6 +155,7 @@ class MbPAplusplus(CL_Base_Model):
                 # if (step+1) % self.REPLAY_FREQ == 0 and i_task!=0 and len(self.memory.memory) >= self.sample_size:
                 if (step+1) % self.REPLAY_FREQ == 0 and len(self.memory.memory) >= self.replay_size:
                     # sample 64 examples from memory
+                    print("Replaying.........................................")
                     S_input_ids, S_attn_masks, S_labels = self.memory.sample(sample_size=self.replay_size)
                     
                     for i in range(self.replay_size):
@@ -184,8 +193,11 @@ class MbPAplusplus(CL_Base_Model):
                 keys = outputs.hidden_states[-1]  #最后一层的输出，hidden_states
                 keys = keys[:, 0, :].squeeze(1) #取第一个token, (bs, hidden_size)
                 # Push the examples into the replay memory
-                self.memory.push(keys.detach().cpu(), (batch['input_ids'].cpu(),
-                                                batch['attention_mask'].cpu(), batch['labels'].cpu()))
+                
+                if memory_num < self.memory_per_task:
+                    self.memory.push(keys.detach().cpu(), (batch['input_ids'].cpu(),
+                                                    batch['attention_mask'].cpu(), batch['labels'].cpu()))
+                    memory_num+=1
                 
                 
                 
@@ -205,47 +217,40 @@ class MbPAplusplus(CL_Base_Model):
                 # of their differences
                 curr_weights = list(self.model.parameters())
                 for base_param, curr_param in zip(base_weights, curr_weights):
-                    diff_loss += (curr_param-base_param).pow(2).sum()
+                    diff_loss += (curr_param-base_param.cuda()).pow(2).sum()
 
                 # Total loss due to log likelihood and weight restraint
                 total_loss = 0.001*diff_loss + R_loss
                 self.model.backward(total_loss)
                 self.model.step()
                 
-
-
-
-    def evaluate(self, round, infer_task_id, task):
-        self.evaluate_one_task(round, infer_task_id, task)
+                del R_outputs
+                del R_loss
+                del diff_loss
+                del total_loss
+                del curr_weights
+                
+    def train_continual(self):
+        for i_task, task in enumerate(self.train_task_list):
+            self.train_one_task(task, i_task, int(self.args.num_train_epochs[i_task]))
+            self.save_model(i_task)
+            if self.args.global_rank<=0:
+                self.evaluate(i_task)
         
     
-    def evaluate_one_task(self, round, i_task, task):
-                
-        if self.args.local_rank == -1:
-            device = torch.device("cuda")
-        else:
-            torch.cuda.set_device(self.args.local_rank)
-            device = torch.device("cuda", self.args.local_rank)
-
-        infer_dataloader = self.test_task_list[task]
-
-        progress_bar = tqdm(total=len(infer_dataloader), leave=True, disable=(self.args.global_rank != 0))
-                
+    def evaluate(self, round):
+        device = "cuda"
         def prediction(model, infer_dataloader):
             predicted_sequences = []
             sources_sequences = []
-            label_sequences = []
-            model.eval()
+            ground_truths = []
             for step, batch in enumerate(infer_dataloader):
-                ground_truths_ids = self.tokenizer(batch['gts'], 
-                                                   truncation=True,
-                                                   max_length=self.args.max_ans_len,
-                                                   add_special_tokens=False,
-                                                   padding='max_length',
-                                                   return_tensors='pt')['input_ids'].to(device)
-                del batch['gts']
+                sources_sequences += batch['sources']
+                ground_truths += batch['gts']
                 del batch['sources']
+                del batch['gts']
                 batch = to_device(batch, device)
+                prompt_len = batch['input_ids'].shape[1]
                 input_ids = batch['input_ids']
                 attn_masks = batch['attention_mask']
                 eval_keys = self.get_keys(batch)
@@ -263,82 +268,96 @@ class MbPAplusplus(CL_Base_Model):
                 for input_ids, attn_mask, (rt_input_ids, rt_attn_masks, rt_labels) in tqdm(zip(input_ids, attn_masks, neightbors_samples), total=len(input_ids)):
                     
                     #Replay for each sample
-                    base_weights = list(self.model.parameters())
+                    base_weights = []
+                    for p in self.model.parameters():
+                        base_weights.append(copy.deepcopy(p))
+                    del p
 
                     rt_input_ids = [r_input_ids.to("cuda") for r_input_ids in rt_input_ids]
                     rt_attn_masks = [r_attn_masks.to("cuda") for r_attn_masks in rt_attn_masks]
                     rt_labels = [r_labels.to("cuda") for r_labels in rt_labels]
                     self.replay_with_neighbors(rt_input_ids, rt_attn_masks, rt_labels, base_weights)
                     
+                    del rt_input_ids
+                    del rt_attn_masks
+                    del rt_labels
+                    
                     self.model.eval()
                     with torch.no_grad():
+                        # TODO, add more inference params
+                        # backbone config
+                        # generate_ids = model.generate(batch['input_ids'], max_new_tokens=args.max_ans_len,
+                        #                               pad_token_id=tokenizer.eos_token_id, attention_mask = batch['attention_mask'], temperature=0.7, do_sample=True, repetition_penalty=2.0 )
+                        # sft config
                         generate_ids = model.generate(input_ids=input_ids.unsqueeze(0),
                                                     attention_mask=attn_mask.unsqueeze(0),
                                                     max_new_tokens=self.args.max_ans_len,
                                                     bos_token_id=self.tokenizer.bos_token_id,
                                                     eos_token_id=self.tokenizer.eos_token_id,
                                                     pad_token_id=self.tokenizer.unk_token_id,
-                                                    generation_config=generation_config,
+                                                    temperature=0.1,
+                                                    do_sample=True,
+                                                    num_return_sequences=1,
+                                                    use_cache=True
                                                     )
-                    # add for distributed 
-                    gathered_ids, max_seq_len = self.dist_results_gather(generate_ids, self.tokenizer.eos_token_id)
-                    gathered_labels, max_label_len = self.dist_results_gather(ground_truths_ids, self.tokenizer.eos_token_id)
-
-                    if self.args.global_rank <= 0:
-                        sou_sequences = self.tokenizer.batch_decode(gathered_ids[:, : max_seq_len], skip_special_tokens=True, clean_up_tokenization_spaces=False)
-                        pre_sequences = self.tokenizer.batch_decode(gathered_ids[:, max_seq_len:], skip_special_tokens=True, clean_up_tokenization_spaces=False)
-                        lab_sequences = self.tokenizer.batch_decode(gathered_labels[:, : max_label_len], skip_special_tokens=True, clean_up_tokenization_spaces=False)
-                        predicted_sequences += pre_sequences
-                        sources_sequences += sou_sequences
-                        label_sequences += lab_sequences
+                    sequences = self.tokenizer.batch_decode(generate_ids[:, prompt_len:], skip_special_tokens=True,
+                                                    clean_up_tokenization_spaces=False)
+                    predicted_sequences += sequences
                     
-                    #param restore
-                    for idx,name, param in enumerate(self.model.named_parameters()):
+                    for idx,(name, param) in enumerate(self.model.named_parameters()):
                         param.data.copy_(base_weights[idx])
+                        
+                    del base_weights
+                break
 
-            return sources_sequences, predicted_sequences, label_sequences
-
-
+            return sources_sequences, predicted_sequences, ground_truths
         def save_inference_results(evaluation_result: dict, sources_sequences: list, predicted_sequences: list,
                                    ground_truths: list, round: int, i_task: int, task: str):
             # save as a json file
             df = {"eval": evaluation_result, 'prompts': sources_sequences, 'results': predicted_sequences,
                   'labels': ground_truths}
-            if not os.path.exists(self.args.output_dir):
-                os.makedirs(self.args.output_dir)
+            output_dir = os.path.join(self.args.output_dir,"predictions")
+            if not os.path.exists(output_dir):
+                os.makedirs(output_dir)
 
-            with open(self.args.output_dir + "/results-" + str(round) + "-" + str(i_task) + "-" + task + ".json", "w+", encoding='utf-8') as file:
+            with open(output_dir + "/results-" + str(round) + "-" + str(i_task) + "-" + task + ".json", "w+", encoding='utf-8') as file:
                 json.dump(df, file, ensure_ascii=False)
+        for inference_task_id in range(round+1):    # evaluation for previous tasks in a single round
+            inference_task = list(self.test_task_list.keys())[inference_task_id]
+            infer_dataloader = self.test_task_list[inference_task]
+            progress_bar = tqdm(total=len(infer_dataloader), leave=True)
 
-
-        # Inference !
-        print_rank_0("***** Start inference *****", self.args.global_rank)
-        sources_sequences, predicted_sequences, ground_truths = prediction(self.model, infer_dataloader)
-
-
-        # Get Accuracy/ROUGE/BLEU/...
-        # The evaluation result is stored in a dictionary. e.g. {"accuracy": .., "rouge-L": ..}
-        if self.args.global_rank <= 0:
-            if task == "ScienceQA":
+            # Inference !
+            print_rank_0("***** Start inference *****", self.args.local_rank)
+            sources_sequences, predicted_sequences, ground_truths = prediction(self.model, infer_dataloader)
+            
+            # Get Accuracy/ROUGE/BLEU/...
+            # The evaluation result is stored in a dictionary. e.g. {"accuracy": .., "rouge-L": ..}
+            if inference_task == "ScienceQA":
                 evaluation_result = eval_ScienceQA.eval(predicted_sequences, ground_truths)
-            elif task == "MeetingBank":
+            elif inference_task == "MeetingBank":
                 evaluation_result = eval_MeetingBank.eval(predicted_sequences, ground_truths)
-            elif task == "C-STANCE":
+            elif inference_task == "C-STANCE":
                 evaluation_result = eval_CStance.eval(predicted_sequences, ground_truths)
-            elif task == "Papyrus-f":
+            elif inference_task == "Papyrus-f":
                 evaluation_result = eval_PapyrusF.eval(predicted_sequences, ground_truths)
-            elif task == "Py150":
+            elif inference_task == "Py150":
                 evaluation_result = eval_Py150.eval(predicted_sequences, ground_truths)
-            elif task == "FOMC":
+            elif inference_task == "FOMC":
                 evaluation_result = eval_FOMC.eval(predicted_sequences, ground_truths)
-            elif task == "NumGLUE-cm":
+            elif inference_task == "NumGLUE-cm":
                 evaluation_result = eval_NumGLUE_cm.eval(predicted_sequences, ground_truths)
-            elif task == "NumGLUE-ds":
+            elif inference_task == "NumGLUE-ds":
                 evaluation_result = eval_NumGLUE_ds.eval(predicted_sequences, ground_truths)
-            # elif task == "ToolBench":
-            #     evaluation_result = eval_ToolBench.eval(predicted_sequences, ground_truths)
+            elif inference_task == "20Minuten":
+                evaluation_result = eval_20Minuten.eval(sources_sequences, predicted_sequences, ground_truths)
             else:
                 evaluation_result = {}
 
+            # if args.global_rank <= 0:  # only one process is running
             print("***** Saving inference results *****")
-            save_inference_results(evaluation_result, sources_sequences, predicted_sequences, ground_truths, round, i_task, task)
+            save_inference_results(evaluation_result, sources_sequences, predicted_sequences, ground_truths, round, inference_task_id, inference_task)
+            
+
+
+

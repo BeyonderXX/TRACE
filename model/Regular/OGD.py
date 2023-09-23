@@ -33,7 +33,7 @@ def orthonormalize(vectors, normalize=True, start_idx=0):
 
 class OGD(CL_Base_Model):
     
-    def __init__(self, model, tokenizer, optimizer, train_task_list, eval_task_list, test_task_list, args,max_memories=50):
+    def __init__(self, model, tokenizer, optimizer, train_task_list, eval_task_list, test_task_list, args,max_memories=150):
         super().__init__(model, tokenizer, optimizer, train_task_list, eval_task_list, test_task_list, args)
         # if args.debug: #debug
         #     self.ogd_basis = torch.ones(n_params, 10, dtype=torch.bfloat16).to('cuda')
@@ -58,16 +58,15 @@ class OGD(CL_Base_Model):
         self.cnt-=1
         proj_basis = self.ogd_basis[beg:end,:]
         
-        
-        if proj_basis.shape[1] > 0:  # param x basis_size
+        if proj_basis.shape[1] > 0 and self.i_task!=0:  # param x basis_size
             # print("Using gradient project:{}".format(gradient.shape))
             gradient = gradient.view(-1)
-            dots = torch.matmul(gradient, proj_basis)  # basis_size
-            out = torch.matmul(proj_basis, dots.permute(*torch.arange(dots.ndim - 1, -1, -1)))
+            PV_vector = torch.mv(proj_basis, torch.mv(proj_basis.t(), gradient))
+            gradient = (gradient - PV_vector)
             # if beg==0:
             #     print("raw grad:{}".format(gradient))
             #     print("projected_grads:{}".format(out.view(raw_shape)))
-            return out.view(raw_shape)
+            return gradient.view(raw_shape)
         else:
             return gradient
         
@@ -108,14 +107,13 @@ class OGD(CL_Base_Model):
 
         dataloader_train = self.train_task_list[task]
 
-
+        self.new_basis=[]
         for epoch in range(epochs):
             # print(epoch)
             self.model.train()
-            total_steps = self.args.num_train_epochs * len(dataloader_train)
+            total_steps = epochs * len(dataloader_train)
             progress_bar = tqdm(total=total_steps, leave=True, disable=(self.args.global_rank != 0))
             
-            self.new_basis=[]
             for step, batch in enumerate(tqdm(dataloader_train)):
                 del batch['sources']
                 batch = {k:batch[k].to('cuda') for k in batch}
@@ -136,10 +134,11 @@ class OGD(CL_Base_Model):
                         self.cur_grads[beg: en].copy_(torch.nan_to_num(hp_grad.data.view(-1),nan=0))
                         cnt += 1
                         
-                # if self.args.global_rank<=0:
                 
                 #每个进程都添加一下，保证每个进程里的new_basis是一样的
-                if len(self.new_basis) < self.max_memories:
+                #最后一个epoch添加
+                # if len(self.new_basis) < self.max_memories and epoch==0:
+                if epoch==(epochs-1):
                     self.new_basis.append(self.cur_grads)
                         
                 
@@ -159,9 +158,11 @@ class OGD(CL_Base_Model):
             
                 
             #正交化
-            new_basis_tensor = torch.stack(self.new_basis).T
-            self.ogd_basis = torch.cat([self.ogd_basis, new_basis_tensor], axis=1)
-            self.ogd_basis = orthonormalize(self.ogd_basis, normalize=True)
+        new_basis_tensor = torch.stack(self.new_basis).T
+        self.ogd_basis = torch.cat([self.ogd_basis, new_basis_tensor], axis=1)
+        self.ogd_basis = orthonormalize(self.ogd_basis, normalize=True)
+        del new_basis_tensor
+        del self.new_basis
 
     
     def train_continual(self):
@@ -169,7 +170,8 @@ class OGD(CL_Base_Model):
             if "lora" in name:
                 params.register_hook(lambda grads: self.project_vec(grads))
         for i_task, task in enumerate(self.train_task_list):
-            self.train_one_task(task, i_task, self.args.num_train_epochs)
+            self.i_task = i_task
+            self.train_one_task(task, i_task, int(self.args.num_train_epochs[i_task]))
             self.save_model(i_task)
 
             # for j_task, _task in enumerate(self.train_task_list):
