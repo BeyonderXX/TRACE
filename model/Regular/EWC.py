@@ -29,8 +29,9 @@ class EWC(CL_Base_Model):
     
     def init_fisher(self):
         for n, p in deepcopy(self.params).items():
-            p.data.zero_()  #所有参数置零
-            self.fisher[n] = p.data  #初始化零矩阵
+            if p.requires_grad==True:
+                p.data.zero_()  #所有参数置零
+                self.fisher[n] = p.data  #初始化零矩阵
             
     #计算每个参数的Fisher信息矩阵的值：每个样本输入模型，每个参数计算梯度的平方和，除以总的样本数量
     def _update_fisher(self):
