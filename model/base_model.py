@@ -124,6 +124,7 @@ class CL_Base_Model:
             save_zero_three_model(self.model,
                                   self.args.global_rank,
                                   self.args.output_dir,
-                                  zero_stage=self.args.zero_stage)
+                                  zero_stage=self.args.zero_stage,
+                                  sub_folder=str(round))
         print_rank_0('Sucessful saving model after round {}'.format(round), self.args.global_rank)
         
