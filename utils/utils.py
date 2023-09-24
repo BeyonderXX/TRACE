@@ -169,8 +169,9 @@ def moving_average(model, model_ema, beta=0.992, device=None, zero_stage=0):
                 param_ema.data.copy_(torch.lerp(data, param_ema.data, beta))
 
 
-def save_zero_three_model(model_ema, global_rank, save_dir, zero_stage=0):
+def save_zero_three_model(model_ema, global_rank, save_dir, zero_stage=0, sub_folder=""):
     zero_stage_3 = (zero_stage == 3)
+    save_dir = os.path.join(save_dir, sub_folder)
     os.makedirs(save_dir, exist_ok=True)
     WEIGHTS_NAME = "pytorch_model.bin"
     output_model_file = os.path.join(save_dir, WEIGHTS_NAME)
