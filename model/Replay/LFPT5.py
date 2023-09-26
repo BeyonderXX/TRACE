@@ -7,7 +7,6 @@ from tqdm import tqdm
 from transformers import AutoTokenizer
 from model.base_model import CL_Base_Model
 from utils.utils import print_rank_0, to_device, get_all_reduce_mean
-from utils.data.data_collator import DataCollator
 from utils.data.data_utils import create_prompt_dataset
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
@@ -45,7 +44,6 @@ def getInitialPrompt(tokenizer, prompt_token_number):
 class LFPT5(CL_Base_Model):
     def __init__(self,
                  model, tokenizer, optimizer, train_task_list, eval_task_list, test_task_list, args,
-                 lambda_lm = 0.1
                  ):
         super().__init__(model, tokenizer, optimizer, train_task_list, eval_task_list, test_task_list, args)
         '''
@@ -58,45 +56,26 @@ class LFPT5(CL_Base_Model):
             torch.cuda.set_device(self.args.local_rank)
             self.device = torch.device("cuda", self.args.local_rank)
 
-        self.lambda_lm = lambda_lm
 
-
-    def get_dataloader(self, task, pseudo_prompt=None, pseudo_answer=None, isLM=False):
-        '''
-        generate datasets for pseudo data generation
-        '''
+    def get_dataloader(self, task, pseudo_prompts, pseudo_answers):
         # get raw data
-        train_dataset, _, _ = create_prompt_dataset(
+        dataset, _, _ = create_prompt_dataset(
             self.args.local_rank,
             os.path.join(self.args.data_path,task),
             self.args.data_output_path,
             self.args.seed
         )
-        
-        if isLM:
-            # create a dataset for training pseudo-data-genertation ability
-            # 'lm' stands for language modeling
-            prompt_dataset = train_dataset.prompt_dataset
-            answer_dataset = train_dataset.answer_dataset
-            prompt_dataset_lm = []
-            answer_dataset_lm = []
-            for idx in range(len(prompt_dataset)):
-                prompt_dataset_lm.append("__" + task + "__")
-                answer_dataset_lm.append(prompt_dataset[idx] + "__ans__" + answer_dataset[idx])
-            train_dataset.prompt_dataset = prompt_dataset_lm
-            train_dataset.answer_dataset = answer_dataset_lm
-        
-        if pseudo_prompt != None or pseudo_answer != None:
-            # add pseudo data
-            train_dataset.prompt_dataset += pseudo_prompt
-            train_dataset.answer_dataset += pseudo_answer
-
+        # add pseudo data
+        if pseudo_prompts != None and pseudo_answers != None:
+            dataset.prompt_dataset += pseudo_prompts
+            dataset.answer_dataset += pseudo_answers
         # create dataLoaders
         if self.args.local_rank == -1:
-            train_sampler = RandomSampler(train_dataset)
+            sampler = RandomSampler(dataset)
         else:
-            train_sampler = DistributedSampler(train_dataset)
-        data_collator  = DataCollator(
+            sampler = DistributedSampler(dataset)
+        from utils.data.data_collator import DataCollator
+        collator  = DataCollator(
             self.tokenizer,
             padding="longest",
             max_prompt_len=self.args.max_prompt_len,
@@ -104,68 +83,52 @@ class LFPT5(CL_Base_Model):
             pad_to_multiple_of=8,
             inference=False
         )
-        train_dataloader = DataLoader(train_dataset,
-                            collate_fn=data_collator,
-                            sampler=train_sampler,
+        dataloader = DataLoader(dataset,
+                            collate_fn=collator,
+                            sampler=sampler,
                             batch_size=self.args.per_device_train_batch_size)
-        return train_dataloader
+        return dataloader
 
 
-    def generate_pseudo_data(self, i_task, times_of_generation=100):
-        i = 0
-        for task_name in self.train_task_list:
-            if i == i_task:
-                print_rank_0(f"pseudo data generation is completed", self.args.global_rank)
-                break 
-            # generate pseudo data of the previous task, given a special token __<task_name>__
-            print_rank_0(f"generating pseudo data for the task: " + task_name, self.args.global_rank)
-            self.model.eval()
-            input_ids = self.tokenizer.encode("__" + task_name + "__", return_tensors='pt').to(self.device)
-            input_ids = input_ids.repeat(self.args.per_device_eval_batch_size,1)
-            attention_mask = torch.ones_like(input_ids)
-            max_len = self.args.max_prompt_len + self.args.max_ans_len
-            pseudo_prompt = []
-            pseudo_answer = []
-            pseudo_prompt_lm = []
-            pseudo_answer_lm = []
-            for time in range(times_of_generation):
-                print_rank_0(f"Generating pseudo data. " + str(times_of_generation - time) + " more times left.", self.args.global_rank)
-                output = self.model.generate(
-                    input_ids=input_ids, 
-                    attention_mask=attention_mask,
-                    max_new_tokens=max_len,
-                    do_sample=True,
-                    temperature=0.7,
-                    repetition_penalty=1.05,
-                    num_return_sequences=5,
-                    )
-                generated_texts = self.tokenizer.batch_decode(output, skip_special_tokens=True)
-                print_rank_0(f"samples generated:", self.args.global_rank)
-                for i in range(10):
-                    print_rank_0(generated_texts[i], self.args.global_rank)
-                for generated_text in generated_texts:
-                    if "__ans__" in generated_text:
-                        generated_text = generated_text.replace("__" + task_name + "__", "")
-                        pseudo_prompt.append(generated_text.split("__ans__")[0])
-                        pseudo_answer.append(generated_text.split("__ans__")[1])
-                        pseudo_prompt_lm.append("__" + task_name + "__")
-                        pseudo_answer_lm.append(generated_text)
-            print_rank_0(f"number of available pseudo prompts:" + str(len(pseudo_prompt)), self.args.global_rank)
-            i += 1
-        return pseudo_prompt, pseudo_answer, pseudo_prompt_lm, pseudo_answer_lm
+    def generate_pseudo_data(self, dataloader, task_name):
+        print_rank_0(f"Generating pseudo data for " + task_name + "...", self.args.global_rank)
+        pseudo_prompts = []
+        pseudo_answers = []
+        self.model.eval()
+        for step, batch in enumerate(dataloader):
+            pseudo_prompts += batch['sources']
+            del batch['sources']
+            batch = to_device(batch, self.device)
+            prompt_len = batch['input_ids'].shape[1]
+            with torch.no_grad():
+                generate_ids = self.model.generate(input_ids=batch['input_ids'],
+                                              attention_mask=batch['attention_mask'],
+                                              max_new_tokens=self.args.max_ans_len,
+                                              bos_token_id=self.tokenizer.bos_token_id,
+                                              eos_token_id=self.tokenizer.eos_token_id,
+                                              pad_token_id=self.tokenizer.unk_token_id,
+                                              temperature=0.1,
+                                              do_sample=True,
+                                              num_return_sequences=1,
+                                              use_cache=True
+                                              )
+            sequences = self.tokenizer.batch_decode(generate_ids[:, prompt_len:], skip_special_tokens=True,
+                                               clean_up_tokenization_spaces=False)
+            pseudo_answers += sequences
+        return pseudo_prompts, pseudo_answers
 
 
     def train_one_task(self, task, i_task, epochs):
-        num_task = len(self.train_task_list)
-        eval_dataloader = self.eval_task_list[task]
-        if i_task > 0:
-            pseudo_prompt, pseudo_answer, pseudo_prompt_lm, pseudo_answer_lm = self.generate_pseudo_data(i_task)
-            print_rank_0(f"adding pseudo data to the original dataset...", self.args.global_rank)
-            train_dataloader = self.get_dataloader(task, pseudo_prompt, pseudo_answer, False)
-            train_dataloader_lm = self.get_dataloader(task, pseudo_prompt_lm, pseudo_answer_lm, True)
-        else: 
-            train_dataloader = self.train_task_list[task]
-            train_dataloader_lm = self.get_dataloader(task, None, None, True)
+        pseudo_prompts = []
+        pseudo_answers = []
+        for idx, previous_task in enumerate(self.train_task_list):
+            if idx == i_task:
+                break
+            previous_dataloder = self.test_task_list[previous_task]
+            prompts, answers = self.generate_pseudo_data(previous_dataloder, previous_task)
+            pseudo_prompts += prompts
+            pseudo_answers += answers
+        train_dataloader = self.get_dataloader(task, pseudo_prompts, pseudo_answers)
 
         #### TRAIN ####
         total_steps = epochs * len(train_dataloader)
@@ -176,14 +139,11 @@ class LFPT5(CL_Base_Model):
                 self.args.global_rank)
             self.model.train()
 
-            for step, (batch, batch_lm) in enumerate(zip(train_dataloader, train_dataloader_lm)):
+            for step, batch in enumerate(train_dataloader):
                 del batch['sources']
-                del batch_lm['sources']
                 batch = to_device(batch, self.device)
-                batch_lm = to_device(batch_lm, self.device)
                 outputs = self.model(**batch, use_cache=False)
-                outputs_lm = self.model(**batch_lm, use_cache=False)
-                loss = outputs.loss + outputs_lm.loss * self.lambda_lm
+                loss = outputs.loss
                 # Update the description to include current step and loss, if needed
                 if self.args.global_rank == 0:
                     # Update the progress bar
