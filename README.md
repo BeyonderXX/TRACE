@@ -149,29 +149,37 @@ model.generate(batch['input_ids'], max_new_tokens=args.max_ans_len, pad_token_id
 **inference_model_path** The folder in which the model is saved after training. Corresponding to the output_dir in the training scripts. The program will iterate through the models in the folder for inference.
 
 
-**naive(naive，full params SFT)**
+**naive(full params SFT) training and inference**
 
 ```
 bash scripts/train_seq_naive.sh
 bash scripts/infer_seq.sh
 ```
 
-**Lora训练和测试**
+**Lora training and inference**
 
 ```
 bash scripts/train_lora.sh
 bash scripts/infer_lora.sh
 ```
 
-**Replay训练和测试**
+**Replay training and inference**
 
 ```
 bash scripts/train_replay.sh
 bash scripts/infer_seq.sh
 ```
 
-**ICL测试**
+**Continual learning methods training and inference**
+
+```
+bash scripts/train_seq_cl.sh
+bash scripts/infer_seq.sh
+```
+
+**ICL**
 
 ```
 bash scripts/ICL.sh
 ```
+
