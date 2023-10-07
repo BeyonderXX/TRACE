@@ -136,51 +136,41 @@ model.generate(batch['input_ids'], max_new_tokens=args.max_ans_len, pad_token_id
 ```
 
 
-### Baseline训练和测试
+### Baseline train and inference
 
 训练和测试脚本中某些参数说明：
 
-**data_path**  数据集存放路径，需要一共包括九个数据集————8个常规训练数据集（C-STANCE,FOMC,MeetingBank,Py150,ScienceQA,NumGLUE-cm,NumGLUE-ds,20Minuten）和一个Replay数据集（Lima）  （需要改）
+**data_path**  Path for the datasets, which in total includes nine datasets ---- eight standard training datasets (C-STANCE, FOMC, MeetingBank, Py150, ScienceQA, NumGLUE-cm, NumGLUE-ds, 20Minuten) and one Replay dataset (Lima).
 
-**model_name_or_path** 模型路径（需要改）
+**past_task_ratio** Parameters for replay training, the replay ratio of past tasks.
 
-**dataset_name**  训练所需要的数据集名称，一般是上面的八个，用”,“隔开
+**CL_method**  If using lora training, set the parameter "lora"; else, set the parameter "base"
 
-**num_train_epochs**  每个数据集训练所需要的epoch数量，用“,”隔开
-
-**past_task_ratio** Replay的参数，replay之前任务多少比例的数据
-
-**output_dir** 输出文件夹，训练完成后，每完成训练一个dataset后保存一次模型，在output_dir下会产生8个文件夹
-
-**CL_method**  持续学习方法，全参数SFT对应“base”，lora对应“lora”，replay不用加
-
-**inference_model_path** 训练完后模型保存的文件夹，和上面的output_dir对应，程序会遍历文件夹中的模型进行时序测试
+**inference_model_path** The folder in which the model is saved after training. Corresponding to the output_dir in the training scripts. The program will iterate through the models in the folder for inference.
 
 
-## 时序训练和测试（naive，全参数SFT）
+**naive(naive，full params SFT)**
 
 ```
 bash scripts/train_seq_naive.sh
 bash scripts/infer_seq.sh
 ```
 
-## Lora训练和测试
+**Lora训练和测试**
 
 ```
 bash scripts/train_lora.sh
 bash scripts/infer_lora.sh
 ```
 
-## Replay训练和测试
-
-测试脚本和时序训练一样
+**Replay训练和测试**
 
 ```
 bash scripts/train_replay.sh
 bash scripts/infer_seq.sh
 ```
 
-## ICL测试
+**ICL测试**
 
 ```
 bash scripts/ICL.sh
