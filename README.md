@@ -4,27 +4,28 @@ Code for paper: **TRACE: A Comprehensive Benchmark for Continual Learning in Lar
 
 ## FrameWork 
 
-.
+
 ├── inference
 │   ├── chatbot.py
-│   └── infer.py			# 推理程序入口
+│   └── infer.py        # Inference program entry point
 ├── LICENSE
 ├── README.md
 ├── requirements.txt
 ├── training
-│   └── main.py			# 训练程序入口
+│   └── main.py        # Training program entry point
 └── utils
     ├── data
     │   ├── data_cache.py
-    │   ├── data_collator.py	# 输入模型前处理
-    │   ├── data_utils.py		# 数据集加载和处理
-    │   └── raw_datasets.py	# 不同数据集类，用来返回数据
+    │   ├── data_collator.py  # Preprocessing before input to the model
+    │   ├── data_utils.py    # Dataset loading and processing
+    │   └── raw_datasets.py  # Different dataset classes for data retrieval
     ├── ds_utils.py
     ├── model
     │   └── model_utils.py
     ├── module
     │   └── lora.py
     └── utils.py
+
 
 ## data preproceess
 
