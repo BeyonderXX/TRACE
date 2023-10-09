@@ -4,7 +4,9 @@ Code for paper: **TRACE: A Comprehensive Benchmark for Continual Learning in Lar
 
 ## Envioronment
 
-We use torch==2.0.1,torchaudio==2.0.2 and torchvision==0.15.2.
+torch==2.0.1  
+torchaudio==2.0.2  
+torchvision==0.15.2  
 
 To install other packages, run
 ```
