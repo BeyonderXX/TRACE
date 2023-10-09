@@ -2,29 +2,14 @@
 
 Code for paper: **TRACE: A Comprehensive Benchmark for Continual Learning in Large Language Models**
 
-## FrameWork 
+## Envioronment
 
+We use torch==2.0.1,torchaudio==2.0.2 and torchvision==0.15.2.
 
-├── inference
-│   ├── chatbot.py
-│   └── infer.py        # Inference program entry point
-├── LICENSE
-├── README.md
-├── requirements.txt
-├── training
-│   └── main.py        # Training program entry point
-└── utils
-    ├── data
-    │   ├── data_cache.py
-    │   ├── data_collator.py  # Preprocessing before input to the model
-    │   ├── data_utils.py    # Dataset loading and processing
-    │   └── raw_datasets.py  # Different dataset classes for data retrieval
-    ├── ds_utils.py
-    ├── model
-    │   └── model_utils.py
-    ├── module
-    │   └── lora.py
-    └── utils.py
+To install other packages, run
+```
+pip install -r requirements.txt
+```
 
 
 ## data preproceess
