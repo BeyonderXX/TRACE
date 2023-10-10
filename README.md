@@ -1,12 +1,22 @@
-# Trace
+# 🌟 TRACE: A Comprehensive Benchmark for Continual Learning in Large Language Models
 
-Code for paper: **TRACE: A Comprehensive Benchmark for Continual Learning in Large Language Models**
+## 💥 Trace Benchmark
+
+<div align=center><img src="./assets/TRACE.jpg" width="80%" /></div>
+
+## ✨ Reasoning-Augmented Continual Learning (RCL) Method
+
+<div align=center><img src="./assets/RCL.jpg" width="80%" /></div>
+
+
 
 ## Requirements
+Our main experiments and analysis are conducted on the following environment:
 
-torch==2.0.1  
-torchaudio==2.0.2  
-torchvision==0.15.2  
+- CUDA (12.2)
+- torch (2.0.1)  
+- torchaudio (2.0.2)  
+- torchvision (0.15.2)  
 
 To install other packages, run
 ```
@@ -42,15 +52,15 @@ Input to data_collator: The content provided to the data_collator is a batch of 
 
 ## Baseline train and inference
 
-Description of some parameters in the training and testing scripts:
+Description of some parameters in the training and inference scripts:
 
-**data_path**  Path for the datasets, which in total includes nine datasets ---- eight standard training datasets (C-STANCE, FOMC, MeetingBank, Py150, ScienceQA, NumGLUE-cm, NumGLUE-ds, 20Minuten) and one Replay dataset (Lima).
+- **data_path**  Path for the datasets, which in total includes nine datasets ---- eight standard training datasets (C-STANCE, FOMC, MeetingBank, Py150, ScienceQA, NumGLUE-cm, NumGLUE-ds, 20Minuten) and one Replay dataset (Lima).
 
-**past_task_ratio** Parameters for replay training, the replay ratio of past tasks.
+- **past_task_ratio** Parameters for replay training, the replay ratio of past tasks.
 
-**CL_method**  If using lora training, set the parameter "lora"; else, set the parameter "base"
+- **CL_method**  If using lora training, set the parameter "lora"; else, set the parameter "base". Besides, our repository also support multi traditional continual learning methods, including "EWC", "OGD", "GEM", "MbPA++", "PP", "L2P", "LFPT5", "O-Lora".
 
-**inference_model_path** The folder in which the model is saved after training. Corresponding to the output_dir in the training scripts. The program will iterate through the models in the folder for inference.
+- **inference_model_path** The folder in which the model is saved after training. Corresponding to the output_dir in the training scripts. The program will iterate through the models in the folder for inference.
 
 
 **naive(full params SFT) training and inference**
@@ -86,4 +96,21 @@ bash scripts/infer_seq.sh
 ```
 bash scripts/ICL.sh
 ```
+
+
+## Evaluation of other capabilities 
+
+### Generalization abilities evaluation
+
+In this paper, to evaluate a model’s general ability, we assess across five key dimensions: Factual Knowledge, General Reasoning, Multilinguality, Commonsense Reasoning, and Reading Comprehension.
+
+We follow [`Opencompass`](https://github.com/open-compass/opencompass) to evaluate the models's above abilities.
+
+### Instruction following and safety evaluation
+
+```
+bash scripts/infer_3H.sh
+```
+
+We use GPT-4 to conduct model evluation, more details can be found in Appendix .9
 
