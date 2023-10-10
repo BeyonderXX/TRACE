@@ -28,6 +28,8 @@ To use flash attention, install **flas_attn**
 
 ## data preproceess
 
+All the data after processing can be downloaded from [`Trace Benchmark`](https://drive.google.com/file/d/1S0SmU0WEw5okW_XvP2Ns0URflNzZq6sV/view?usp=drive_link)
+
 dataset load logic can be found in  [`utils.data.raw_datasets.py`](utils/data/data_utils.py)
 
 1. If using datasts on huggingface，use datasets.load_dataset(ds_name) to load.
