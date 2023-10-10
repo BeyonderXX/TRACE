@@ -2,7 +2,7 @@
 
 Code for paper: **TRACE: A Comprehensive Benchmark for Continual Learning in Large Language Models**
 
-## Envioronment
+## Requirements
 
 torch==2.0.1  
 torchaudio==2.0.2  
@@ -13,7 +13,7 @@ To install other packages, run
 pip install -r requirements.txt
 ```
 
-To use flash attention, install flas_attn accordingly.
+To use flash attention, install **flas_attn**
 
 
 ## data preproceess
