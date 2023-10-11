@@ -116,3 +116,18 @@ bash scripts/infer_3H.sh
 
 We use GPT-4 to conduct model evluation, more details can be found in Appendix .9
 
+
+## Citation
+If you use our work, please cite our paper:
+
+```latex
+@misc{wang2023trace,
+      title={TRACE: A Comprehensive Benchmark for Continual Learning in Large Language Models}, 
+      author={Xiao Wang and Yuansen Zhang and Tianze Chen and Songyang Gao and Senjie Jin and Xianjun Yang and Zhiheng Xi and Rui Zheng and Yicheng Zou and Tao Gui and Qi Zhang and Xuanjing Huang},
+      year={2023},
+      eprint={2310.06762},
+      archivePrefix={arXiv},
+      primaryClass={cs.CL}
+}
+```
+
