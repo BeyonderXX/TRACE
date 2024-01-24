@@ -121,13 +121,11 @@ We use GPT-4 to conduct model evluation, more details can be found in Appendix .
 If you use our work, please cite our paper:
 
 ```latex
-@misc{wang2023trace,
-      title={TRACE: A Comprehensive Benchmark for Continual Learning in Large Language Models}, 
-      author={Xiao Wang and Yuansen Zhang and Tianze Chen and Songyang Gao and Senjie Jin and Xianjun Yang and Zhiheng Xi and Rui Zheng and Yicheng Zou and Tao Gui and Qi Zhang and Xuanjing Huang},
-      year={2023},
-      eprint={2310.06762},
-      archivePrefix={arXiv},
-      primaryClass={cs.CL}
+@article{wang2023trace,
+  title={TRACE: A Comprehensive Benchmark for Continual Learning in Large Language Models},
+  author={Wang, Xiao and Zhang, Yuansen and Chen, Tianze and Gao, Songyang and Jin, Senjie and Yang, Xianjun and Xi, Zhiheng and Zheng, Rui and Zou, Yicheng and Gui, Tao and others},
+  journal={arXiv preprint arXiv:2310.06762},
+  year={2023}
 }
 ```
 
